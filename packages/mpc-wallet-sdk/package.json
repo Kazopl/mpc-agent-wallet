@@ -1,0 +1,94 @@
+{
+  "name": "@mpc-wallet/sdk",
+  "version": "0.1.0",
+  "description": "TypeScript SDK for MPC-secured AI agent wallets with 2-of-3 threshold signing",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js"
+    },
+    "./wasm": {
+      "types": "./dist/wasm/index.d.ts",
+      "import": "./dist/wasm/index.mjs",
+      "require": "./dist/wasm/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "src"
+  ],
+  "sideEffects": false,
+  "scripts": {
+    "build": "tsup",
+    "dev": "tsup --watch",
+    "test": "vitest",
+    "test:coverage": "vitest --coverage",
+    "lint": "eslint src",
+    "lint:fix": "eslint src --fix",
+    "format": "prettier --write src",
+    "format:check": "prettier --check src",
+    "typecheck": "tsc --noEmit",
+    "prepublishOnly": "npm run build"
+  },
+  "keywords": [
+    "mpc",
+    "wallet",
+    "threshold",
+    "ecdsa",
+    "ai-agent",
+    "ethereum",
+    "solana",
+    "web3",
+    "crypto",
+    "multi-party-computation",
+    "erc-4337",
+    "account-abstraction"
+  ],
+  "author": "Cătălin Dinu",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Kazopl/mpc-agent-wallet.git",
+    "directory": "packages/mpc-wallet-sdk"
+  },
+  "bugs": {
+    "url": "https://github.com/Kazopl/mpc-agent-wallet/issues"
+  },
+  "homepage": "https://github.com/Kazopl/mpc-agent-wallet#readme",
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "dependencies": {
+    "@mpc-wallet/wasm": "^0.1.0"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "@types/node": "^22.10.0",
+    "eslint": "^9.39.2",
+    "prettier": "^3.4.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.52.0",
+    "vitest": "^2.1.8"
+  },
+  "peerDependencies": {
+    "@solana/web3.js": "^1.98.0 || ^2.0.0",
+    "viem": "^2.21.0"
+  },
+  "peerDependenciesMeta": {
+    "viem": {
+      "optional": true
+    },
+    "@solana/web3.js": {
+      "optional": true
+    }
+  }
+}
