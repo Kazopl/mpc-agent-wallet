@@ -1,0 +1,97 @@
+[build-system]
+requires = ["hatchling>=1.25"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mpc-wallet"
+version = "0.1.0"
+description = "Python SDK for MPC-secured AI agent wallets"
+readme = "README.md"
+license = "MIT"
+authors = [{ name = "Cătălin Dinu" }]
+keywords = ["mpc", "wallet", "threshold", "ecdsa", "ai-agent", "ethereum", "solana", "web3", "crypto"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Security :: Cryptography",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Typing :: Typed",
+]
+requires-python = ">=3.10"
+dependencies = [
+    "pydantic>=2.10",
+    "httpx>=0.28",
+    "cryptography>=44.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.25",
+    "pytest-cov>=6.0",
+    "ruff>=0.9",
+    "mypy>=1.14",
+]
+evm = [
+    "web3>=7.6",
+]
+solana = [
+    "solana>=0.36",
+    "solders>=0.25",
+]
+all = [
+    "mpc-wallet[evm,solana]",
+]
+
+[project.urls]
+Homepage = "https://github.com/Kazopl/mpc-agent-wallet"
+Documentation = "https://github.com/Kazopl/mpc-agent-wallet#readme"
+Repository = "https://github.com/Kazopl/mpc-agent-wallet.git"
+Issues = "https://github.com/Kazopl/mpc-agent-wallet/issues"
+Changelog = "https://github.com/Kazopl/mpc-agent-wallet/blob/main/CHANGELOG.md"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/mpc_wallet"]
+
+[tool.hatch.build.targets.sdist]
+include = [
+    "/src",
+    "/README.md",
+    "/LICENSE",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM", "TCH", "PTH", "PL"]
+ignore = ["E501", "PLR0913"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["mpc_wallet"]
+
+[tool.mypy]
+python_version = "3.10"
+strict = true
+warn_return_any = true
+warn_unused_configs = true
+plugins = ["pydantic.mypy"]
+
+[tool.pydantic-mypy]
+init_forbid_extra = true
+init_typed = true
+warn_required_dynamic_aliases = true
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+testpaths = ["tests"]
+addopts = "-ra -q"
