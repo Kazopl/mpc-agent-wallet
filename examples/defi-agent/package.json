@@ -1,0 +1,22 @@
+{
+  "name": "mpc-wallet-defi-agent",
+  "version": "1.0.0",
+  "description": "Automated DeFi agent using MPC wallet",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@mpc-wallet/sdk": "^0.1.0",
+    "viem": "^2.44.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

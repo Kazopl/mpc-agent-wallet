@@ -1,0 +1,25 @@
+{
+  "name": "mpc-wallet-telegram-bot",
+  "version": "1.0.0",
+  "description": "Telegram bot for MPC wallet transaction approvals",
+  "type": "module",
+  "main": "dist/index.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts"
+  },
+  "dependencies": {
+    "@mpc-wallet/sdk": "^0.1.0",
+    "grammy": "^1.39.2",
+    "viem": "^2.44.0",
+    "ws": "^8.18.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/ws": "^8.5.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0"
+  }
+}

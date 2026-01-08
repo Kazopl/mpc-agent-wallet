@@ -1,0 +1,17 @@
+# MPC Wallet SDK
+mpc-wallet>=0.1.0
+
+# LangChain (latest versions as of January 2026)
+langchain>=1.2.3
+langchain-openai>=1.1.6
+langchain-core>=0.3.60
+
+# Utilities
+python-dotenv>=1.0.0
+pydantic>=2.10.0
+
+# Web3 (for address resolution)
+web3>=7.0.0
+
+# Async support
+aiohttp>=3.11.0
