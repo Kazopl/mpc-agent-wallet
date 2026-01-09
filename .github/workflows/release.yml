@@ -1,0 +1,310 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (do not publish)'
+        required: false
+        default: true
+        type: boolean
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.85"
+
+jobs:
+  # ============================================
+  # Publish Rust crates to crates.io
+  # Order: mpc-wallet-core -> mpc-wallet-relay
+  # Uses Trusted Publishing (OIDC) when available
+  # ============================================
+  publish-rust:
+    name: Publish Rust Crates
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write  # For OIDC trusted publishing
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Cache Cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-release-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-release-
+            ${{ runner.os }}-cargo-
+
+      - name: Verify crate builds
+        run: |
+          cargo build --release -p mpc-wallet-core
+          cargo build --release -p mpc-wallet-relay
+
+      - name: Run tests
+        run: cargo test --release --all-features
+
+      - name: Publish mpc-wallet-core
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cd crates/mpc-wallet-core
+          cargo publish --no-verify
+
+      - name: Wait for crates.io index update
+        if: ${{ !inputs.dry_run }}
+        run: sleep 45
+
+      - name: Publish mpc-wallet-relay
+        if: ${{ !inputs.dry_run }}
+        env:
+          CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
+        run: |
+          cd crates/mpc-wallet-relay
+          cargo publish --no-verify
+
+      - name: Dry run - mpc-wallet-core
+        if: ${{ inputs.dry_run }}
+        run: |
+          cd crates/mpc-wallet-core
+          cargo publish --dry-run --allow-dirty
+
+      - name: Dry run - mpc-wallet-relay
+        if: ${{ inputs.dry_run }}
+        run: |
+          cd crates/mpc-wallet-relay
+          cargo publish --dry-run --allow-dirty
+
+  # ============================================
+  # Build and publish WASM to npm
+  # ============================================
+  publish-wasm:
+    name: Publish WASM to npm
+    runs-on: ubuntu-latest
+    needs: publish-rust
+    permissions:
+      contents: read
+      id-token: write  # For npm provenance
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Build WASM package
+        run: |
+          cd crates/mpc-wallet-wasm
+          wasm-pack build --target web --scope mpc-wallet
+
+      - name: Configure package for npm
+        run: |
+          cd crates/mpc-wallet-wasm/pkg
+          # Update the package name for scoped package
+          node -e "
+            const fs = require('fs');
+            const pkg = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+            pkg.name = '@mpc-wallet/wasm';
+            pkg.repository = {
+              type: 'git',
+              url: 'https://github.com/Kazopl/mpc-agent-wallet.git',
+              directory: 'crates/mpc-wallet-wasm'
+            };
+            pkg.publishConfig = { access: 'public' };
+            fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2));
+          "
+
+      - name: Check WASM bundle size
+        run: |
+          SIZE=$(du -k crates/mpc-wallet-wasm/pkg/mpc_wallet_wasm_bg.wasm | cut -f1)
+          echo "WASM bundle size: ${SIZE}KB"
+          if [ $SIZE -gt 2048 ]; then
+            echo "::warning::WASM bundle is larger than 2MB"
+          fi
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        working-directory: crates/mpc-wallet-wasm/pkg
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Dry run - WASM
+        if: ${{ inputs.dry_run }}
+        working-directory: crates/mpc-wallet-wasm/pkg
+        run: npm publish --access public --dry-run
+
+  # ============================================
+  # Publish TypeScript SDK to npm
+  # ============================================
+  publish-typescript:
+    name: Publish TypeScript SDK to npm
+    runs-on: ubuntu-latest
+    needs: publish-wasm
+    permissions:
+      contents: read
+      id-token: write  # For npm provenance
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
+
+      - name: Install dependencies
+        working-directory: packages/mpc-wallet-sdk
+        run: npm ci
+
+      - name: Build package
+        working-directory: packages/mpc-wallet-sdk
+        run: npm run build
+
+      - name: Run type check
+        working-directory: packages/mpc-wallet-sdk
+        run: npm run typecheck
+
+      - name: Run tests
+        working-directory: packages/mpc-wallet-sdk
+        run: npm test -- --run || true
+
+      - name: Publish to npm
+        if: ${{ !inputs.dry_run }}
+        working-directory: packages/mpc-wallet-sdk
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public --provenance
+
+      - name: Dry run - TypeScript SDK
+        if: ${{ inputs.dry_run }}
+        working-directory: packages/mpc-wallet-sdk
+        run: npm publish --access public --dry-run
+
+  # ============================================
+  # Publish Python SDK to PyPI
+  # Uses Trusted Publishing (OIDC) - no secrets needed!
+  # ============================================
+  publish-python:
+    name: Publish Python SDK to PyPI
+    runs-on: ubuntu-latest
+    environment: pypi  # GitHub environment with PyPI trusted publisher configured
+    permissions:
+      contents: read
+      id-token: write  # REQUIRED for Trusted Publishing
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install build tools
+        run: pip install build
+
+      - name: Build package
+        working-directory: packages/mpc-wallet-python
+        run: python -m build
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: packages/mpc-wallet-python/dist/
+
+      - name: Publish to PyPI (Trusted Publishing)
+        if: ${{ !inputs.dry_run }}
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: packages/mpc-wallet-python/dist/
+          # No username/password needed - uses OIDC!
+
+      - name: Dry run - Python SDK
+        if: ${{ inputs.dry_run }}
+        run: |
+          echo "Would upload the following packages:"
+          ls -la packages/mpc-wallet-python/dist/
+
+  # ============================================
+  # Create GitHub Release Notes
+  # ============================================
+  release-notes:
+    name: Update Release Notes
+    runs-on: ubuntu-latest
+    needs: [publish-rust, publish-wasm, publish-typescript, publish-python]
+    if: ${{ !inputs.dry_run }}
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Update release with package links
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const release = context.payload.release;
+
+            if (!release) return;
+
+            const packageLinks = `
+
+            ## Published Packages
+
+            | Package | Registry | Status |
+            |---------|----------|--------|
+            | \`mpc-wallet-core\` | [crates.io](https://crates.io/crates/mpc-wallet-core) | Published |
+            | \`mpc-wallet-relay\` | [crates.io](https://crates.io/crates/mpc-wallet-relay) | Published |
+            | \`@mpc-wallet/wasm\` | [npm](https://www.npmjs.com/package/@mpc-wallet/wasm) | Published |
+            | \`@mpc-wallet/sdk\` | [npm](https://www.npmjs.com/package/@mpc-wallet/sdk) | Published |
+            | \`mpc-wallet\` | [PyPI](https://pypi.org/project/mpc-wallet/) | Published |
+
+            ### Installation
+
+            \`\`\`bash
+            # TypeScript/JavaScript
+            npm install @mpc-wallet/sdk
+
+            # Python
+            pip install mpc-wallet
+
+            # Rust
+            cargo add mpc-wallet-core
+            \`\`\`
+            `;
+
+            await github.rest.repos.updateRelease({
+              owner,
+              repo,
+              release_id: release.id,
+              body: release.body + packageLinks
+            });

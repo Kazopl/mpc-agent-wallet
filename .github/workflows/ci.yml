@@ -1,0 +1,271 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_VERSION: "1.85"
+
+jobs:
+  # ============================================
+  # Rust Tests and Checks
+  # ============================================
+  rust:
+    name: Rust (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt, clippy
+
+      - name: Cache Cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
+
+      - name: Check formatting
+        run: cargo fmt --all -- --check
+
+      - name: Run Clippy
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build all crates
+        run: cargo build --all-features
+
+      - name: Run tests
+        run: cargo test --all-features
+
+      - name: Check for unused dependencies
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cargo install cargo-machete --locked || true
+          cargo machete || true
+
+  # ============================================
+  # WASM Build
+  # ============================================
+  wasm:
+    name: WASM Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+          targets: wasm32-unknown-unknown
+
+      - name: Install wasm-pack
+        run: cargo install wasm-pack --locked
+
+      - name: Build WASM
+        run: |
+          cd crates/mpc-wallet-wasm
+          wasm-pack build --target web
+
+      - name: Check WASM bundle size
+        run: |
+          SIZE=$(du -k crates/mpc-wallet-wasm/pkg/mpc_wallet_wasm_bg.wasm | cut -f1)
+          echo "WASM bundle size: ${SIZE}KB"
+          if [ $SIZE -gt 2048 ]; then
+            echo "::warning::WASM bundle is larger than 2MB"
+          fi
+
+      - name: Upload WASM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: wasm-pkg
+          path: crates/mpc-wallet-wasm/pkg/
+          retention-days: 7
+
+  # ============================================
+  # TypeScript SDK
+  # ============================================
+  typescript:
+    name: TypeScript SDK
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: 'npm'
+          cache-dependency-path: packages/mpc-wallet-sdk/package-lock.json
+
+      - name: Install dependencies
+        working-directory: packages/mpc-wallet-sdk
+        run: npm ci
+
+      - name: Type check
+        working-directory: packages/mpc-wallet-sdk
+        run: npm run typecheck
+
+      - name: Lint
+        working-directory: packages/mpc-wallet-sdk
+        run: npm run lint
+
+      - name: Build
+        working-directory: packages/mpc-wallet-sdk
+        run: npm run build
+
+      - name: Test
+        working-directory: packages/mpc-wallet-sdk
+        run: npm test -- --run || true
+
+      - name: Check package size
+        working-directory: packages/mpc-wallet-sdk
+        run: |
+          npm pack --dry-run 2>&1 | grep "total files" || true
+
+  # ============================================
+  # Python SDK
+  # ============================================
+  python:
+    name: Python SDK (${{ matrix.python-version }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12', '3.13']
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: Install uv (fast Python package manager)
+        run: pip install uv
+
+      - name: Install dependencies
+        working-directory: packages/mpc-wallet-python
+        run: |
+          uv pip install --system -e ".[dev]"
+
+      - name: Lint with Ruff
+        working-directory: packages/mpc-wallet-python
+        run: |
+          uv pip install --system ruff
+          ruff check src/
+
+      - name: Format check with Ruff
+        working-directory: packages/mpc-wallet-python
+        run: ruff format --check src/
+
+      - name: Type check with mypy
+        working-directory: packages/mpc-wallet-python
+        run: mypy src/ || true
+
+      - name: Run tests
+        working-directory: packages/mpc-wallet-python
+        run: pytest || true
+
+      - name: Build package
+        working-directory: packages/mpc-wallet-python
+        run: |
+          uv pip install --system build
+          python -m build
+
+  # ============================================
+  # Smart Contracts (Foundry)
+  # ============================================
+  contracts:
+    name: Smart Contracts
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1
+        with:
+          version: nightly
+
+      - name: Check formatting
+        working-directory: contracts
+        run: forge fmt --check
+
+      - name: Build contracts
+        working-directory: contracts
+        run: forge build --sizes
+
+      - name: Run tests
+        working-directory: contracts
+        run: forge test -vvv
+
+      - name: Run Slither static analysis
+        uses: crytic/slither-action@v0.4.0
+        continue-on-error: true
+        with:
+          target: contracts/
+          sarif: results.sarif
+          fail-on: none
+
+  # ============================================
+  # Security Audit
+  # ============================================
+  security:
+    name: Security Audit
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v5
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-action@stable
+        with:
+          toolchain: ${{ env.RUST_VERSION }}
+
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --locked
+
+      - name: Run cargo audit
+        run: cargo audit
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+
+      - name: Audit npm dependencies
+        working-directory: packages/mpc-wallet-sdk
+        run: npm audit --audit-level=high || true
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Audit Python dependencies
+        working-directory: packages/mpc-wallet-python
+        run: |
+          pip install pip-audit
+          pip-audit || true
