@@ -3,6 +3,7 @@ pragma solidity ^0.8.24;
 
 import { IMpcSmartAccount } from "./interfaces/IMpcSmartAccount.sol";
 import { IEntryPoint } from "./interfaces/IEntryPoint.sol";
+import { ISessionKeyModule } from "./interfaces/ISessionKeyModule.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { IERC1271 } from "@openzeppelin/contracts/interfaces/IERC1271.sol";
@@ -107,6 +108,12 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
     /// @notice Timestamp when daily limit resets
     uint256 internal _dailyResetTime;
 
+    /// @notice Session key module address
+    address public sessionKeyModule;
+
+    /// @notice Current session key signer (set during validation, used in execution)
+    address internal _currentSessionKeySigner;
+
     /// @notice Address whitelist (target => allowed)
     mapping(address => bool) internal _whitelist;
 
@@ -185,30 +192,90 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
         _dailyResetTime = block.timestamp + DAILY_PERIOD;
     }
 
+    /**
+     * @notice Set the session key module address
+     * @param _sessionKeyModule Address of the session key module
+     */
+    function setSessionKeyModule(
+        address _sessionKeyModule
+    ) external onlySelfOrRecovery {
+        sessionKeyModule = _sessionKeyModule;
+    }
+
     /*//////////////////////////////////////////////////////////////
                          ERC-4337 VALIDATION
     //////////////////////////////////////////////////////////////*/
 
     /**
      * @notice Validate a UserOperation signature
-     * @dev Verifies the MPC threshold signature against the stored public key
+     * @dev Verifies the MPC threshold signature or session key signature
+     *
+     * Signature format detection:
+     * - Session key signature: 85 bytes (20 bytes signer address + 65 bytes ECDSA sig)
+     * - MPC signature: 65 bytes (standard ECDSA signature)
+     *
      * @param userOp The UserOperation to validate
      * @param userOpHash Hash of the UserOperation
      * @param missingAccountFunds Funds to deposit for gas
-     * @return validationData 0 for success, 1 for failure
+     * @return validationData 0 for success, 1 for failure (or packed time bounds for session keys)
      */
     function validateUserOp(
         IEntryPoint.PackedUserOperation calldata userOp,
         bytes32 userOpHash,
         uint256 missingAccountFunds
     ) external onlyEntryPoint returns (uint256 validationData) {
-        // Validate MPC signature
-        validationData = _validateMpcSignature(userOpHash, userOp.signature);
+        // Check if this is a session key signature
+        if (_isSessionKeySignature(userOp.signature)) {
+            validationData = _validateSessionKey(userOpHash, userOp.signature);
+        } else {
+            // Fall back to MPC signature validation
+            validationData = _validateMpcSignature(userOpHash, userOp.signature);
+            // Clear any previous session key signer
+            _currentSessionKeySigner = address(0);
+        }
 
         // Pay prefund to EntryPoint
         if (missingAccountFunds > 0) {
             (bool success,) = payable(address(_entryPoint)).call{ value: missingAccountFunds }("");
             (success); // Ignore failure - EntryPoint will check deposit
+        }
+
+        return validationData;
+    }
+
+    /**
+     * @notice Check if a signature is a session key signature
+     * @dev Session key signatures are 85 bytes (20 address + 65 ECDSA)
+     *      MPC signatures are 65 bytes (standard ECDSA)
+     * @param signature The signature to check
+     * @return True if this appears to be a session key signature
+     */
+    function _isSessionKeySignature(
+        bytes calldata signature
+    ) internal view returns (bool) {
+        // Session key signatures are 85 bytes and session key module must be set
+        return signature.length == 85 && sessionKeyModule != address(0);
+    }
+
+    /**
+     * @notice Validate a session key signature
+     * @param userOpHash Hash of the UserOperation
+     * @param signature The session key signature (20 bytes signer + 65 bytes ECDSA)
+     * @return validationData Packed validation data with time bounds
+     */
+    function _validateSessionKey(
+        bytes32 userOpHash,
+        bytes calldata signature
+    ) internal returns (uint256 validationData) {
+        // Delegate validation to session key module
+        validationData = ISessionKeyModule(sessionKeyModule).validateSessionKey(address(this), userOpHash, signature);
+
+        // Extract and store the session key signer for use in execution
+        // If validation succeeded (not returning SIG_VALIDATION_FAILED)
+        if (validationData != SIG_VALIDATION_FAILED) {
+            _currentSessionKeySigner = address(bytes20(signature[:20]));
+        } else {
+            _currentSessionKeySigner = address(0);
         }
 
         return validationData;
@@ -289,8 +356,19 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
         uint256 value,
         bytes calldata data
     ) external payable onlyEntryPoint returns (bytes memory returnData) {
-        // Check policies
-        _checkPolicies(target, value);
+        // If using a session key, validate against session key restrictions
+        if (_currentSessionKeySigner != address(0) && sessionKeyModule != address(0)) {
+            ISessionKeyModule(sessionKeyModule).validateAndRecordSpending(
+                address(this), _currentSessionKeySigner, target, value, data
+            );
+            // Clear session key signer after use
+            _currentSessionKeySigner = address(0);
+        } else {
+            // Check policies for MPC-signed transactions
+            _checkPolicies(target, value);
+            // Record spending
+            _recordSpending(value);
+        }
 
         // Execute call
         bool success;
@@ -299,9 +377,6 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
         if (!success) {
             revert ExecutionFailed(target, returnData);
         }
-
-        // Record spending
-        _recordSpending(value);
 
         emit TransactionExecuted(target, value, data, returnData);
     }
@@ -325,9 +400,22 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
             totalValue += values[i];
         }
 
-        // Check policies for batch
-        for (uint256 i = 0; i < length; i++) {
-            _checkPolicies(targets[i], values[i]);
+        // If using a session key, validate against session key restrictions
+        if (_currentSessionKeySigner != address(0) && sessionKeyModule != address(0)) {
+            for (uint256 i = 0; i < length; i++) {
+                ISessionKeyModule(sessionKeyModule).validateAndRecordSpending(
+                    address(this), _currentSessionKeySigner, targets[i], values[i], datas[i]
+                );
+            }
+            // Clear session key signer after use
+            _currentSessionKeySigner = address(0);
+        } else {
+            // Check policies for MPC-signed batch
+            for (uint256 i = 0; i < length; i++) {
+                _checkPolicies(targets[i], values[i]);
+            }
+            // Record total spending
+            _recordSpending(totalValue);
         }
 
         returnDatas = new bytes[](length);
@@ -340,9 +428,6 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
                 revert ExecutionFailed(targets[i], returnDatas[i]);
             }
         }
-
-        // Record total spending
-        _recordSpending(totalValue);
 
         emit TransactionBatchExecuted(targets, values, datas);
     }
@@ -511,6 +596,15 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
      */
     function getMpcAddress() external view returns (address) {
         return _publicKeyToAddress(_mpcPublicKey);
+    }
+
+    /**
+     * @notice Get the current session key signer (set during validation)
+     * @dev This is only valid between validateUserOp and execute calls
+     * @return The session key signer address, or zero if not using session key
+     */
+    function getCurrentSessionKeySigner() external view returns (address) {
+        return _currentSessionKeySigner;
     }
 
     /*//////////////////////////////////////////////////////////////
