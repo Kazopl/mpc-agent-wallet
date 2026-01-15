@@ -6,6 +6,13 @@ import type { KeyShare, KeygenConfig } from './keygen';
 import { KeygenSession } from './keygen';
 import type { PolicyDecision } from './policy';
 import { PolicyConfig, PolicyEngine } from './policy';
+import type {
+  SessionKey,
+  SessionKeyConfig,
+  SessionKeySignature,
+  SessionKeyStatus,
+} from './session';
+import { SessionKeyManager } from './session';
 import type { SigningConfig } from './signing';
 import { SigningSession } from './signing';
 import type { KeyShareStore } from './storage';
@@ -14,6 +21,7 @@ import type {
   Address,
   ChainType,
   PartyRole,
+  TransactionParams,
   TransactionRequest,
 } from './types';
 import { MpcWalletError, ErrorCode } from './types';
@@ -66,12 +74,14 @@ export interface WalletConfig {
 export class MpcAgentWallet {
   private keyShare: KeyShare | null = null;
   private policyEngine: PolicyEngine | null = null;
+  private sessionKeyManager: SessionKeyManager;
   private storage: KeyShareStore;
   private role: PartyRole;
 
   private constructor(config: WalletConfig = {}) {
     this.role = config.role ?? 0; // Default to Agent
     this.storage = config.storage ?? new MemoryStore();
+    this.sessionKeyManager = new SessionKeyManager();
 
     if (config.policy) {
       this.policyEngine = new PolicyEngine(config.policy);
@@ -235,6 +245,208 @@ export class MpcAgentWallet {
       return { approved: true, requiresAdditionalApproval: false };
     }
     return this.policyEngine.evaluate(tx);
+  }
+
+  // ============================================================================
+  // Session Keys
+  // ============================================================================
+
+  /**
+   * Create a new session key for delegated signing
+   *
+   * Session keys enable AI agents to operate with scoped, time-limited
+   * permissions without exposing the master MPC key shares.
+   *
+   * @param config - Session key configuration
+   * @returns The created session key with private key for signing
+   *
+   * @example
+   * ```typescript
+   * // Create a session key valid for 24 hours with 1 ETH spending limit
+   * const sessionKey = await wallet.createSessionKey({
+   *   validFor: 24 * 60 * 60, // 24 hours
+   *   spendingLimit: 1000000000000000000n, // 1 ETH
+   *   whitelist: ['0x7a250d5630B4cF539739dF2C5dAcb4c659F2488D'],
+   * });
+   * ```
+   */
+  async createSessionKey(config: SessionKeyConfig): Promise<SessionKey> {
+    return this.sessionKeyManager.createSessionKey(config);
+  }
+
+  /**
+   * Revoke an existing session key
+   *
+   * @param signer - Session key signer address to revoke
+   *
+   * @example
+   * ```typescript
+   * await wallet.revokeSessionKey(sessionKey.signer);
+   * ```
+   */
+  revokeSessionKey(signer: string): void {
+    this.sessionKeyManager.revokeSessionKey(signer);
+  }
+
+  /**
+   * Get all active session keys
+   *
+   * @returns Array of active (non-revoked, non-expired) session keys
+   */
+  listSessionKeys(): SessionKey[] {
+    return this.sessionKeyManager.getActiveSessionKeys();
+  }
+
+  /**
+   * Get all session keys including revoked and expired
+   *
+   * @returns Array of all session keys
+   */
+  listAllSessionKeys(): SessionKey[] {
+    return this.sessionKeyManager.listSessionKeys();
+  }
+
+  /**
+   * Get session key by signer address
+   *
+   * @param signer - Session key signer address
+   * @returns The session key or null if not found
+   */
+  getSessionKey(signer: string): SessionKey | null {
+    return this.sessionKeyManager.getSessionKey(signer);
+  }
+
+  /**
+   * Get session key status
+   *
+   * @param signer - Session key signer address
+   * @returns Status information including validity and remaining spending
+   */
+  getSessionKeyStatus(signer: string): SessionKeyStatus {
+    return this.sessionKeyManager.getSessionKeyStatus(signer);
+  }
+
+  /**
+   * Sign a hash with a session key
+   *
+   * Creates a signature in the format expected by MpcSmartAccount:
+   * [signer address (20 bytes)][ECDSA signature (65 bytes)]
+   *
+   * @param signer - Session key signer address
+   * @param hash - 32-byte hash to sign
+   * @returns Session key signature
+   *
+   * @example
+   * ```typescript
+   * const signature = await wallet.signWithSessionKey(
+   *   sessionKey.signer,
+   *   userOpHash
+   * );
+   * // Use signature.signature in the UserOperation
+   * ```
+   */
+  async signWithSessionKey(
+    signer: string,
+    hash: Uint8Array | string
+  ): Promise<SessionKeySignature> {
+    return this.sessionKeyManager.signWithSessionKey(signer, hash);
+  }
+
+  /**
+   * Execute a transaction using a session key
+   *
+   * This validates the transaction against session key restrictions
+   * and signs it with the session key.
+   *
+   * @param sessionKey - Session key to use for signing
+   * @param tx - Transaction parameters
+   * @returns Signed transaction data ready for submission
+   *
+   * @example
+   * ```typescript
+   * const signedTx = await wallet.executeWithSessionKey(sessionKey, {
+   *   to: '0x1234...',
+   *   value: '0.1', // 0.1 ETH
+   *   data: '0x...',
+   * });
+   * ```
+   */
+  async executeWithSessionKey(
+    sessionKey: SessionKey,
+    tx: TransactionParams
+  ): Promise<{
+    signature: SessionKeySignature;
+    transaction: TransactionParams;
+    validated: boolean;
+  }> {
+    // Validate transaction against session key restrictions
+    const isValid = this.sessionKeyManager.validateTransaction(
+      sessionKey.signer,
+      tx
+    );
+
+    if (!isValid) {
+      const status = this.sessionKeyManager.getSessionKeyStatus(sessionKey.signer);
+      throw new MpcWalletError(
+        ErrorCode.PolicyViolation,
+        `Transaction not allowed by session key: ${status.message}`
+      );
+    }
+
+    // Create transaction hash for signing
+    const txHash = this.hashTransaction({
+      requestId: `sk-${Date.now()}`,
+      chain: 0, // EVM
+      to: tx.to,
+      value: tx.value,
+      data: tx.data,
+      chainId: tx.chainId,
+      gasLimit: tx.gasLimit ? Number(tx.gasLimit) : undefined,
+      timestamp: Date.now(),
+    });
+
+    // Sign with session key
+    const signature = await this.sessionKeyManager.signWithSessionKey(
+      sessionKey.signer,
+      txHash
+    );
+
+    // Record spending
+    const value = BigInt(tx.value || '0');
+    if (value > 0n) {
+      this.sessionKeyManager.recordSpending(sessionKey.signer, value);
+    }
+
+    return {
+      signature,
+      transaction: tx,
+      validated: true,
+    };
+  }
+
+  /**
+   * Update whitelist for an existing session key
+   *
+   * @param signer - Session key signer address
+   * @param whitelist - New whitelist addresses
+   */
+  updateSessionKeyWhitelist(signer: string, whitelist: string[]): void {
+    const sessionKey = this.sessionKeyManager.getSessionKey(signer);
+    if (!sessionKey) {
+      throw new MpcWalletError(
+        ErrorCode.InvalidConfig,
+        `Session key not found: ${signer}`
+      );
+    }
+    // Note: This only updates locally. On-chain update requires separate call
+    sessionKey.whitelist = whitelist.map((addr) => addr.toLowerCase() as Address);
+  }
+
+  /**
+   * Get the session key manager for advanced operations
+   */
+  getSessionKeyManager(): SessionKeyManager {
+    return this.sessionKeyManager;
   }
 
   // ============================================================================

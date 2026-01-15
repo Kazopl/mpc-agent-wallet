@@ -59,6 +59,19 @@ export {
   type ContractRestriction,
 } from './policy';
 
+// Session keys
+export {
+  SessionKeyManager,
+  type SessionKey,
+  type SessionKeyConfig,
+  type SessionKeySignature,
+  type SessionKeyStatus,
+  type SessionKeyExport,
+  encodeSessionKeyParams,
+  parseSessionKeyFromContract,
+  generateSessionKeyId,
+} from './session';
+
 // Chain adapters
 export * from './chains';
 
