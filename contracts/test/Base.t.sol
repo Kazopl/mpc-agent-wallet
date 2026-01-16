@@ -6,6 +6,7 @@ import { MpcSmartAccount } from "../src/MpcSmartAccount.sol";
 import { MpcSmartAccountFactory } from "../src/MpcSmartAccountFactory.sol";
 import { MpcRecoveryModule } from "../src/modules/MpcRecoveryModule.sol";
 import { MpcSpendingLimitHook } from "../src/modules/MpcSpendingLimitHook.sol";
+import { MpcSessionKeyModule } from "../src/modules/MpcSessionKeyModule.sol";
 import { IEntryPoint } from "../src/interfaces/IEntryPoint.sol";
 
 /**
@@ -20,6 +21,7 @@ abstract contract BaseTest is Test {
     MpcSmartAccountFactory public factory;
     MpcRecoveryModule public recoveryModule;
     MpcSpendingLimitHook public spendingLimitHook;
+    MpcSessionKeyModule public sessionKeyModule;
 
     // Mock EntryPoint for testing
     MockEntryPoint public entryPoint;
@@ -39,6 +41,10 @@ abstract contract BaseTest is Test {
     address public bundler;
     address public beneficiary;
     address public attacker;
+
+    // Session key test actors
+    address public sessionKeySigner;
+    uint256 public sessionKeySignerKey;
 
     /*//////////////////////////////////////////////////////////////
                                CONSTANTS
@@ -65,6 +71,7 @@ abstract contract BaseTest is Test {
         (bundler,) = makeAddrAndKey("bundler");
         (beneficiary,) = makeAddrAndKey("beneficiary");
         (attacker,) = makeAddrAndKey("attacker");
+        (sessionKeySigner, sessionKeySignerKey) = makeAddrAndKey("sessionKeySigner");
 
         // Deploy mock EntryPoint
         entryPoint = new MockEntryPoint();
@@ -73,6 +80,7 @@ abstract contract BaseTest is Test {
         factory = new MpcSmartAccountFactory(IEntryPoint(address(entryPoint)));
         recoveryModule = new MpcRecoveryModule();
         spendingLimitHook = new MpcSpendingLimitHook();
+        sessionKeyModule = new MpcSessionKeyModule();
 
         // Fund actors
         vm.deal(mpcSigner, INITIAL_BALANCE);
@@ -139,6 +147,23 @@ abstract contract BaseTest is Test {
 
         (uint8 v, bytes32 r, bytes32 s) = vm.sign(mpcSignerKey, ethSignedHash);
         return abi.encodePacked(r, s, v);
+    }
+
+    /**
+     * @notice Sign a hash with a session key
+     * @dev Session key signature format: [signer address (20 bytes)][ECDSA signature (65 bytes)]
+     */
+    function signWithSessionKey(
+        bytes32 hash,
+        address signer,
+        uint256 signerKey
+    ) internal view returns (bytes memory) {
+        bytes32 ethSignedHash = keccak256(abi.encodePacked("\x19Ethereum Signed Message:\n32", hash));
+
+        (uint8 v, bytes32 r, bytes32 s) = vm.sign(signerKey, ethSignedHash);
+        bytes memory ecdsaSig = abi.encodePacked(r, s, v);
+
+        return abi.encodePacked(signer, ecdsaSig);
     }
 
     /**
