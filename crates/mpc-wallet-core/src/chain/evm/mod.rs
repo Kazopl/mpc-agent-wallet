@@ -116,6 +116,21 @@ impl EvmConfig {
         }
     }
 
+    /// Create config for Base Sepolia testnet
+    pub fn base_sepolia() -> Self {
+        Self {
+            chain_id: ChainId::BASE_SEPOLIA,
+            rpc_urls: vec![
+                "https://sepolia.base.org".to_string(),
+                "https://base-sepolia.drpc.org".to_string(),
+            ],
+            explorer_url: Some("https://sepolia.basescan.org".to_string()),
+            symbol: "ETH".to_string(),
+            decimals: 18,
+            eip1559_supported: true,
+        }
+    }
+
     /// Create config for Optimism
     pub fn optimism() -> Self {
         Self {
