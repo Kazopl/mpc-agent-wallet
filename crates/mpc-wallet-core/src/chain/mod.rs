@@ -58,6 +58,7 @@ impl ChainId {
     pub const ARBITRUM_ONE: ChainId = ChainId(42161);
     pub const OPTIMISM: ChainId = ChainId(10);
     pub const BASE: ChainId = ChainId(8453);
+    pub const BASE_SEPOLIA: ChainId = ChainId(84532);
     pub const POLYGON: ChainId = ChainId(137);
     pub const BSC: ChainId = ChainId(56);
     pub const AVALANCHE: ChainId = ChainId(43114);
@@ -75,6 +76,7 @@ impl ChainId {
             42161 => "Arbitrum One",
             10 => "Optimism",
             8453 => "Base",
+            84532 => "Base Sepolia",
             137 => "Polygon",
             56 => "BNB Smart Chain",
             43114 => "Avalanche C-Chain",
