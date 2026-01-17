@@ -66,6 +66,14 @@ export const EVMChains = {
     decimals: 18,
     explorerUrl: 'https://basescan.org',
   },
+  BASE_SEPOLIA: {
+    chainId: 84532,
+    name: 'Base Sepolia',
+    rpcUrls: ['https://sepolia.base.org', 'https://base-sepolia.drpc.org'],
+    symbol: 'ETH',
+    decimals: 18,
+    explorerUrl: 'https://sepolia.basescan.org',
+  },
   POLYGON: {
     chainId: 137,
     name: 'Polygon',
