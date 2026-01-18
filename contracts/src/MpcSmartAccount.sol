@@ -4,6 +4,7 @@ pragma solidity ^0.8.24;
 import { IMpcSmartAccount } from "./interfaces/IMpcSmartAccount.sol";
 import { IEntryPoint } from "./interfaces/IEntryPoint.sol";
 import { ISessionKeyModule } from "./interfaces/ISessionKeyModule.sol";
+import { IDelayModule } from "./interfaces/IDelayModule.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { IERC1271 } from "@openzeppelin/contracts/interfaces/IERC1271.sol";
@@ -111,6 +112,9 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
     /// @notice Session key module address
     address public sessionKeyModule;
 
+    /// @notice Delay module address for high-value transaction delays
+    address public delayModule;
+
     /// @notice Current session key signer (set during validation, used in execution)
     address internal _currentSessionKeySigner;
 
@@ -200,6 +204,16 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
         address _sessionKeyModule
     ) external onlySelfOrRecovery {
         sessionKeyModule = _sessionKeyModule;
+    }
+
+    /**
+     * @notice Set the delay module address
+     * @param _delayModule Address of the delay module
+     */
+    function setDelayModule(
+        address _delayModule
+    ) external onlySelfOrRecovery {
+        delayModule = _delayModule;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -370,7 +384,15 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
             _recordSpending(value);
         }
 
-        // Execute call
+        // Check if delay is required for high-value transactions
+        if (_requiresDelay(value)) {
+            // Queue transaction for delayed execution
+            bytes32 txHash = IDelayModule(delayModule).queueTransaction(target, value, data);
+            // Return the tx hash encoded as return data
+            return abi.encode(txHash);
+        }
+
+        // Execute call immediately
         bool success;
         (success, returnData) = target.call{ value: value }(data);
 
@@ -379,6 +401,51 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
         }
 
         emit TransactionExecuted(target, value, data, returnData);
+    }
+
+    /**
+     * @notice Execute a previously queued delayed transaction
+     * @param txHash Hash of the queued transaction
+     * @return returnData Return data from the executed call
+     */
+    function executeDelayed(bytes32 txHash) external onlyEntryPoint returns (bytes memory returnData) {
+        if (delayModule == address(0)) {
+            revert ExecutionFailed(address(0), "Delay module not set");
+        }
+
+        // Get the pending transaction details
+        IDelayModule.PendingTx memory pendingTx = IDelayModule(delayModule).getPendingTx(address(this), txHash);
+
+        // Execute through the delay module (which verifies cooldown has passed)
+        returnData = IDelayModule(delayModule).executeQueued(txHash);
+
+        emit TransactionExecuted(pendingTx.target, pendingTx.value, pendingTx.data, returnData);
+
+        return returnData;
+    }
+
+    /**
+     * @notice Cancel a queued delayed transaction
+     * @param txHash Hash of the queued transaction
+     */
+    function cancelDelayed(bytes32 txHash) external onlySelfOrRecovery {
+        if (delayModule == address(0)) {
+            revert ExecutionFailed(address(0), "Delay module not set");
+        }
+
+        IDelayModule(delayModule).cancelQueued(txHash);
+    }
+
+    /**
+     * @notice Check if a transaction value requires delay
+     * @param value The transaction value
+     * @return True if delay is required
+     */
+    function _requiresDelay(uint256 value) internal view returns (bool) {
+        if (delayModule == address(0)) {
+            return false;
+        }
+        return IDelayModule(delayModule).requiresDelay(address(this), value);
     }
 
     /**

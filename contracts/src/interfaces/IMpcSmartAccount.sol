@@ -138,6 +138,23 @@ interface IMpcSmartAccount {
     ) external payable returns (bytes[] memory returnDatas);
 
     /*//////////////////////////////////////////////////////////////
+                         DELAYED EXECUTION
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Execute a previously queued delayed transaction
+     * @param txHash Hash of the queued transaction
+     * @return returnData Return data from the executed call
+     */
+    function executeDelayed(bytes32 txHash) external returns (bytes memory returnData);
+
+    /**
+     * @notice Cancel a queued delayed transaction
+     * @param txHash Hash of the queued transaction
+     */
+    function cancelDelayed(bytes32 txHash) external;
+
+    /*//////////////////////////////////////////////////////////////
                                GETTERS
     //////////////////////////////////////////////////////////////*/
 
