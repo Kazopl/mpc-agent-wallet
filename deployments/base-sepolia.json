@@ -1,0 +1,16 @@
+{
+  "chainId": 84532,
+  "network": "base-sepolia",
+  "contracts": {
+    "MpcSmartAccountFactory": "0x0000000000000000000000000000000000000000",
+    "MpcSmartAccountImplementation": "0x0000000000000000000000000000000000000000",
+    "MpcRecoveryModule": "0x0000000000000000000000000000000000000000",
+    "MpcSpendingLimitHook": "0x0000000000000000000000000000000000000000"
+  },
+  "entryPoint": "0x0000000071727De22E5E9d8BAf0edAc6f37da032",
+  "deployedAt": "2026-01-16",
+  "deployer": "0x0000000000000000000000000000000000000000",
+  "blockExplorer": "https://sepolia.basescan.org",
+  "rpcUrl": "https://sepolia.base.org",
+  "notes": "Placeholder addresses - update after running deployment script"
+}
