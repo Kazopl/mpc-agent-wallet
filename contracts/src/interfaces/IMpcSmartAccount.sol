@@ -12,6 +12,16 @@ import { IEntryPoint } from "./IEntryPoint.sol";
  * - MPC threshold signature validation (aggregated from 2-of-3 shares)
  * - Policy engine for spending limits, whitelists, and time restrictions
  * - Upgradeable via UUPS pattern
+ * - ERC-7579 modular account support (see IERC7579Module.sol for module interfaces)
+ *
+ * ERC-7579 Compliance:
+ * The MpcSmartAccount implementation also implements IERC7579AccountConfig and
+ * IERC7579ModuleConfig for modular smart account interoperability. This enables:
+ * - Dynamic module installation/uninstallation
+ * - Validator modules (Type 1) for custom signature validation
+ * - Executor modules (Type 2) for authorized external execution
+ * - Fallback handler modules (Type 3) for custom function handling
+ * - Hook modules (Type 4) for pre/post execution checks
  */
 interface IMpcSmartAccount {
     /*//////////////////////////////////////////////////////////////

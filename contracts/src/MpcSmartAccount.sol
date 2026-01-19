@@ -5,6 +5,12 @@ import { IMpcSmartAccount } from "./interfaces/IMpcSmartAccount.sol";
 import { IEntryPoint } from "./interfaces/IEntryPoint.sol";
 import { ISessionKeyModule } from "./interfaces/ISessionKeyModule.sol";
 import { IDelayModule } from "./interfaces/IDelayModule.sol";
+import {
+    IERC7579Module,
+    IERC7579AccountConfig,
+    IERC7579ModuleConfig,
+    ERC7579ModuleTypes
+} from "./interfaces/IERC7579Module.sol";
 import { ECDSA } from "@openzeppelin/contracts/utils/cryptography/ECDSA.sol";
 import { MessageHashUtils } from "@openzeppelin/contracts/utils/cryptography/MessageHashUtils.sol";
 import { IERC1271 } from "@openzeppelin/contracts/interfaces/IERC1271.sol";
@@ -14,7 +20,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
 /**
  * @title MpcSmartAccount
  * @author MPC Agent Wallet SDK
- * @notice ERC-4337 smart account secured by MPC threshold signatures
+ * @notice ERC-4337 smart account secured by MPC threshold signatures with ERC-7579 modular support
  *
  * @dev Key features:
  *      - 2-of-3 threshold MPC signature validation
@@ -22,6 +28,7 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
  *      - Time-based transaction restrictions
  *      - Upgradeable via UUPS pattern
  *      - EIP-1271 signature validation
+ *      - ERC-7579 modular account architecture for extensibility
  *
  * Architecture:
  * ┌─────────────────────────────────────────────────────────────────────────────┐
@@ -60,7 +67,14 @@ import { UUPSUpgradeable } from "@openzeppelin/contracts-upgradeable/proxy/utils
  * - On-chain policies provide additional protection
  * - Recovery module enables key rotation without fund loss
  */
-contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgradeable {
+contract MpcSmartAccount is
+    IMpcSmartAccount,
+    IERC1271,
+    IERC7579AccountConfig,
+    IERC7579ModuleConfig,
+    Initializable,
+    UUPSUpgradeable
+{
     using ECDSA for bytes32;
     using MessageHashUtils for bytes32;
 
@@ -82,6 +96,44 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
 
     /// @notice Time period for daily limit reset
     uint256 public constant DAILY_PERIOD = 1 days;
+
+    /// @notice Account implementation identifier
+    string public constant ACCOUNT_ID = "mpc-agent-wallet.smart-account.v1";
+
+    /*//////////////////////////////////////////////////////////////
+                       ERC-7579 EXECUTION MODES
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Default single execution mode
+    bytes32 public constant EXEC_MODE_DEFAULT = bytes32(0);
+
+    /// @notice Batch execution mode
+    bytes32 public constant EXEC_MODE_BATCH = bytes32(uint256(1));
+
+    /// @notice Try (failure-tolerant) execution mode
+    bytes32 public constant EXEC_MODE_TRY = bytes32(uint256(2));
+
+    /// @notice Delegatecall execution mode (not supported for security)
+    bytes32 public constant EXEC_MODE_DELEGATECALL = bytes32(uint256(0xff));
+
+    /*//////////////////////////////////////////////////////////////
+                          ERC-7579 ERRORS
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Thrown when module type is not supported
+    error UnsupportedModuleType(uint256 moduleTypeId);
+
+    /// @notice Thrown when module is already installed
+    error ModuleAlreadyInstalled(uint256 moduleTypeId, address module);
+
+    /// @notice Thrown when module is not installed
+    error ModuleNotInstalled(uint256 moduleTypeId, address module);
+
+    /// @notice Thrown when execution mode is not supported
+    error UnsupportedExecutionMode(bytes32 mode);
+
+    /// @notice Thrown when module address is invalid
+    error InvalidModuleAddress();
 
     /*//////////////////////////////////////////////////////////////
                             IMMUTABLE STATE
@@ -132,6 +184,35 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
 
     /// @notice Whether time restrictions are enabled
     bool internal _timeRestrictionsEnabled;
+
+    /*//////////////////////////////////////////////////////////////
+                       ERC-7579 MODULE STORAGE
+    //////////////////////////////////////////////////////////////*/
+
+    /// @notice Installed validators (moduleTypeId 1)
+    /// @dev Maps module address => installed status
+    mapping(address => bool) internal _installedValidators;
+
+    /// @notice Installed executors (moduleTypeId 2)
+    /// @dev Maps module address => installed status
+    mapping(address => bool) internal _installedExecutors;
+
+    /// @notice Installed fallback handlers (moduleTypeId 3)
+    /// @dev Maps selector => module address
+    mapping(bytes4 => address) internal _fallbackHandlers;
+
+    /// @notice Installed hooks (moduleTypeId 4)
+    /// @dev Maps module address => installed status
+    mapping(address => bool) internal _installedHooks;
+
+    /// @notice Array of installed validators for enumeration
+    address[] internal _validatorList;
+
+    /// @notice Array of installed executors for enumeration
+    address[] internal _executorList;
+
+    /// @notice Array of installed hooks for enumeration
+    address[] internal _hookList;
 
     /*//////////////////////////////////////////////////////////////
                               MODIFIERS
@@ -749,6 +830,334 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
     }
 
     /*//////////////////////////////////////////////////////////////
+                    ERC-7579 ACCOUNT CONFIGURATION
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @inheritdoc IERC7579AccountConfig
+     * @dev Returns the unique identifier for this account implementation
+     */
+    function accountId() external pure override returns (string memory) {
+        return ACCOUNT_ID;
+    }
+
+    /**
+     * @inheritdoc IERC7579AccountConfig
+     * @dev Supports default (single call) and batch execution modes
+     *      Delegatecall is explicitly not supported for security
+     */
+    function supportsExecutionMode(bytes32 mode) external pure override returns (bool) {
+        return mode == EXEC_MODE_DEFAULT || mode == EXEC_MODE_BATCH || mode == EXEC_MODE_TRY;
+    }
+
+    /**
+     * @inheritdoc IERC7579AccountConfig
+     * @dev Supports all four ERC-7579 module types:
+     *      1 = Validator, 2 = Executor, 3 = Fallback, 4 = Hook
+     */
+    function supportsModule(uint256 moduleTypeId) external pure override returns (bool) {
+        return moduleTypeId >= ERC7579ModuleTypes.MODULE_TYPE_VALIDATOR
+            && moduleTypeId <= ERC7579ModuleTypes.MODULE_TYPE_HOOK;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                    ERC-7579 MODULE CONFIGURATION
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @inheritdoc IERC7579ModuleConfig
+     * @dev Installs a module on this account
+     *      - Type 1 (Validator): Added to validator set
+     *      - Type 2 (Executor): Added to executor set
+     *      - Type 3 (Fallback): Registered for specific selectors (decoded from initData)
+     *      - Type 4 (Hook): Added to hook set
+     */
+    function installModule(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata initData
+    ) external override onlySelfOrRecovery {
+        if (module == address(0)) {
+            revert InvalidModuleAddress();
+        }
+
+        // Verify module supports the claimed type
+        if (!IERC7579Module(module).isModuleType(moduleTypeId)) {
+            revert UnsupportedModuleType(moduleTypeId);
+        }
+
+        if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_VALIDATOR) {
+            _installValidator(module, initData);
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_EXECUTOR) {
+            _installExecutor(module, initData);
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_FALLBACK) {
+            _installFallbackHandler(module, initData);
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_HOOK) {
+            _installHook(module, initData);
+        } else {
+            revert UnsupportedModuleType(moduleTypeId);
+        }
+
+        emit ModuleInstalled(moduleTypeId, module);
+    }
+
+    /**
+     * @inheritdoc IERC7579ModuleConfig
+     * @dev Uninstalls a module from this account
+     */
+    function uninstallModule(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata deInitData
+    ) external override onlySelfOrRecovery {
+        if (module == address(0)) {
+            revert InvalidModuleAddress();
+        }
+
+        if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_VALIDATOR) {
+            _uninstallValidator(module, deInitData);
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_EXECUTOR) {
+            _uninstallExecutor(module, deInitData);
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_FALLBACK) {
+            _uninstallFallbackHandler(module, deInitData);
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_HOOK) {
+            _uninstallHook(module, deInitData);
+        } else {
+            revert UnsupportedModuleType(moduleTypeId);
+        }
+
+        emit ModuleUninstalled(moduleTypeId, module);
+    }
+
+    /**
+     * @inheritdoc IERC7579ModuleConfig
+     * @dev For fallback handlers, additionalContext should contain the selector (bytes4)
+     */
+    function isModuleInstalled(
+        uint256 moduleTypeId,
+        address module,
+        bytes calldata additionalContext
+    ) external view override returns (bool) {
+        if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_VALIDATOR) {
+            return _installedValidators[module];
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_EXECUTOR) {
+            return _installedExecutors[module];
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_FALLBACK) {
+            if (additionalContext.length >= 4) {
+                bytes4 selector = bytes4(additionalContext[:4]);
+                return _fallbackHandlers[selector] == module;
+            }
+            return false;
+        } else if (moduleTypeId == ERC7579ModuleTypes.MODULE_TYPE_HOOK) {
+            return _installedHooks[module];
+        }
+        return false;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                    MODULE INSTALLATION INTERNALS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Install a validator module
+     * @param module The validator module address
+     * @param initData Initialization data for the module
+     */
+    function _installValidator(address module, bytes calldata initData) internal {
+        if (_installedValidators[module]) {
+            revert ModuleAlreadyInstalled(ERC7579ModuleTypes.MODULE_TYPE_VALIDATOR, module);
+        }
+
+        _installedValidators[module] = true;
+        _validatorList.push(module);
+
+        // Call module's onInstall
+        IERC7579Module(module).onInstall(initData);
+    }
+
+    /**
+     * @notice Uninstall a validator module
+     * @param module The validator module address
+     * @param deInitData Cleanup data for the module
+     */
+    function _uninstallValidator(address module, bytes calldata deInitData) internal {
+        if (!_installedValidators[module]) {
+            revert ModuleNotInstalled(ERC7579ModuleTypes.MODULE_TYPE_VALIDATOR, module);
+        }
+
+        _installedValidators[module] = false;
+        _removeFromArray(_validatorList, module);
+
+        // Call module's onUninstall
+        IERC7579Module(module).onUninstall(deInitData);
+    }
+
+    /**
+     * @notice Install an executor module
+     * @param module The executor module address
+     * @param initData Initialization data for the module
+     */
+    function _installExecutor(address module, bytes calldata initData) internal {
+        if (_installedExecutors[module]) {
+            revert ModuleAlreadyInstalled(ERC7579ModuleTypes.MODULE_TYPE_EXECUTOR, module);
+        }
+
+        _installedExecutors[module] = true;
+        _executorList.push(module);
+
+        // Call module's onInstall
+        IERC7579Module(module).onInstall(initData);
+    }
+
+    /**
+     * @notice Uninstall an executor module
+     * @param module The executor module address
+     * @param deInitData Cleanup data for the module
+     */
+    function _uninstallExecutor(address module, bytes calldata deInitData) internal {
+        if (!_installedExecutors[module]) {
+            revert ModuleNotInstalled(ERC7579ModuleTypes.MODULE_TYPE_EXECUTOR, module);
+        }
+
+        _installedExecutors[module] = false;
+        _removeFromArray(_executorList, module);
+
+        // Call module's onUninstall
+        IERC7579Module(module).onUninstall(deInitData);
+    }
+
+    /**
+     * @notice Install a fallback handler module
+     * @dev initData format: abi.encode(bytes4[] selectors)
+     * @param module The fallback handler module address
+     * @param initData Initialization data containing selectors to register
+     */
+    function _installFallbackHandler(address module, bytes calldata initData) internal {
+        // Decode selectors from initData
+        bytes4[] memory selectors = abi.decode(initData, (bytes4[]));
+
+        for (uint256 i = 0; i < selectors.length; i++) {
+            bytes4 selector = selectors[i];
+            if (_fallbackHandlers[selector] != address(0)) {
+                revert ModuleAlreadyInstalled(ERC7579ModuleTypes.MODULE_TYPE_FALLBACK, module);
+            }
+            _fallbackHandlers[selector] = module;
+        }
+
+        // Call module's onInstall with the original initData
+        IERC7579Module(module).onInstall(initData);
+    }
+
+    /**
+     * @notice Uninstall a fallback handler module
+     * @dev deInitData format: abi.encode(bytes4[] selectors)
+     * @param module The fallback handler module address
+     * @param deInitData Cleanup data containing selectors to unregister
+     */
+    function _uninstallFallbackHandler(address module, bytes calldata deInitData) internal {
+        // Decode selectors from deInitData
+        bytes4[] memory selectors = abi.decode(deInitData, (bytes4[]));
+
+        for (uint256 i = 0; i < selectors.length; i++) {
+            bytes4 selector = selectors[i];
+            if (_fallbackHandlers[selector] != module) {
+                revert ModuleNotInstalled(ERC7579ModuleTypes.MODULE_TYPE_FALLBACK, module);
+            }
+            _fallbackHandlers[selector] = address(0);
+        }
+
+        // Call module's onUninstall
+        IERC7579Module(module).onUninstall(deInitData);
+    }
+
+    /**
+     * @notice Install a hook module
+     * @param module The hook module address
+     * @param initData Initialization data for the module
+     */
+    function _installHook(address module, bytes calldata initData) internal {
+        if (_installedHooks[module]) {
+            revert ModuleAlreadyInstalled(ERC7579ModuleTypes.MODULE_TYPE_HOOK, module);
+        }
+
+        _installedHooks[module] = true;
+        _hookList.push(module);
+
+        // Call module's onInstall
+        IERC7579Module(module).onInstall(initData);
+    }
+
+    /**
+     * @notice Uninstall a hook module
+     * @param module The hook module address
+     * @param deInitData Cleanup data for the module
+     */
+    function _uninstallHook(address module, bytes calldata deInitData) internal {
+        if (!_installedHooks[module]) {
+            revert ModuleNotInstalled(ERC7579ModuleTypes.MODULE_TYPE_HOOK, module);
+        }
+
+        _installedHooks[module] = false;
+        _removeFromArray(_hookList, module);
+
+        // Call module's onUninstall
+        IERC7579Module(module).onUninstall(deInitData);
+    }
+
+    /**
+     * @notice Remove an address from an array (swap and pop)
+     * @param array The array to modify
+     * @param element The element to remove
+     */
+    function _removeFromArray(address[] storage array, address element) internal {
+        uint256 length = array.length;
+        for (uint256 i = 0; i < length; i++) {
+            if (array[i] == element) {
+                array[i] = array[length - 1];
+                array.pop();
+                return;
+            }
+        }
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       MODULE ENUMERATION
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Get all installed validator modules
+     * @return Array of validator module addresses
+     */
+    function getInstalledValidators() external view returns (address[] memory) {
+        return _validatorList;
+    }
+
+    /**
+     * @notice Get all installed executor modules
+     * @return Array of executor module addresses
+     */
+    function getInstalledExecutors() external view returns (address[] memory) {
+        return _executorList;
+    }
+
+    /**
+     * @notice Get all installed hook modules
+     * @return Array of hook module addresses
+     */
+    function getInstalledHooks() external view returns (address[] memory) {
+        return _hookList;
+    }
+
+    /**
+     * @notice Get the fallback handler for a specific selector
+     * @param selector The function selector
+     * @return The handler module address (or zero if none)
+     */
+    function getFallbackHandler(bytes4 selector) external view returns (address) {
+        return _fallbackHandlers[selector];
+    }
+
+    /*//////////////////////////////////////////////////////////////
                              FALLBACK
     //////////////////////////////////////////////////////////////*/
 
@@ -759,6 +1168,29 @@ contract MpcSmartAccount is IMpcSmartAccount, IERC1271, Initializable, UUPSUpgra
 
     /**
      * @notice Fallback for unknown function calls
+     * @dev Routes to installed fallback handler modules if one exists for the selector
      */
-    fallback() external payable { }
+    fallback() external payable {
+        bytes4 selector = msg.sig;
+        address handler = _fallbackHandlers[selector];
+
+        if (handler != address(0)) {
+            // Delegate to fallback handler
+            assembly {
+                // Copy calldata to memory
+                calldatacopy(0, 0, calldatasize())
+
+                // Call the handler with the calldata
+                let result := call(gas(), handler, callvalue(), 0, calldatasize(), 0, 0)
+
+                // Copy return data
+                returndatacopy(0, 0, returndatasize())
+
+                switch result
+                case 0 { revert(0, returndatasize()) }
+                default { return(0, returndatasize()) }
+            }
+        }
+        // If no handler, just accept the call (no-op)
+    }
 }
