@@ -5,6 +5,7 @@ members = [
     "crates/mpc-wallet-wasm",
     "crates/mpc-wallet-relay",
     "crates/mpc-wallet-cli",
+    "programs/mpc-spending-limit",
 ]
 
 [workspace.package]
@@ -104,10 +105,10 @@ alloy-consensus = "0.6"
 alloy-eips = "0.6"
 alloy-rpc-types = "0.6"
 
-# Solana (use v2.2 for zeroize compatibility with curve25519-dalek 4.x)
-solana-sdk = "2.2"
-spl-token = { version = "7.0", features = ["no-entrypoint"] }
-spl-associated-token-account = { version = "7.0", features = ["no-entrypoint"] }
+# Solana (use v2.3 for Anchor 0.32.x compatibility)
+solana-sdk = "2.3"
+spl-token = { version = "8.0", features = ["no-entrypoint"] }
+spl-associated-token-account = { version = "8.0", features = ["no-entrypoint"] }
 
 [profile.release]
 lto = "thin"

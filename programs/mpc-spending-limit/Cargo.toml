@@ -1,0 +1,28 @@
+[package]
+name = "mpc-spending-limit"
+version = "0.1.0"
+description = "Solana program for MPC wallet spending limits with PDA-based tracking"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/Kazopl/mpc-agent-wallet"
+
+[lib]
+crate-type = ["cdylib", "lib"]
+name = "mpc_spending_limit"
+
+[features]
+default = []
+cpi = ["no-entrypoint"]
+no-entrypoint = []
+no-idl = []
+no-log-ix-name = []
+idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
+
+[dependencies]
+anchor-lang = "0.32.1"
+anchor-spl = "0.32.1"
+
+[dev-dependencies]
+solana-program-test = "2.3"
+solana-sdk = "2.3"
+tokio = { version = "1.0", features = ["full"] }
