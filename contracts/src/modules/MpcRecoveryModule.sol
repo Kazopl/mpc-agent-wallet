@@ -3,11 +3,13 @@ pragma solidity ^0.8.24;
 
 import { IMpcRecoveryModule } from "../interfaces/IMpcRecoveryModule.sol";
 import { IMpcSmartAccount } from "../interfaces/IMpcSmartAccount.sol";
+import { IERC7579Module } from "../interfaces/IERC7579Module.sol";
 
 /**
  * @title MpcRecoveryModule
  * @author MPC Agent Wallet SDK
  * @notice Enables secure MPC public key recovery with time-delayed execution
+ * @dev Implements IERC7579Module (Type 2: Executor) for ERC-7579 compatibility
  *
  * @dev Key features:
  *      - Guardian-initiated recovery (no single point of failure)
@@ -55,10 +57,13 @@ import { IMpcSmartAccount } from "../interfaces/IMpcSmartAccount.sol";
  * - Current key holders (AI agent + user) can cancel during delay
  * - On-chain visibility ensures transparency
  */
-contract MpcRecoveryModule is IMpcRecoveryModule {
+contract MpcRecoveryModule is IMpcRecoveryModule, IERC7579Module {
     /*//////////////////////////////////////////////////////////////
                                CONSTANTS
     //////////////////////////////////////////////////////////////*/
+
+    /// @notice ERC-7579 Executor module type ID
+    uint256 public constant MODULE_TYPE = 2;
 
     /// @notice Default recovery delay (2 days)
     uint256 public constant DEFAULT_RECOVERY_DELAY = 2 days;
@@ -114,6 +119,89 @@ contract MpcRecoveryModule is IMpcRecoveryModule {
             revert OnlyAccountOrGuardian();
         }
         _;
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       ERC-7579 MODULE FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @inheritdoc IERC7579Module
+     * @dev Initializes recovery for the calling account
+     *      Data format: abi.encode(guardians[], recoveryDelay)
+     */
+    function onInstall(bytes calldata data) external override {
+        address account = msg.sender;
+
+        if (_initialized[account]) {
+            revert AlreadyInitialized(account);
+        }
+
+        // Decode initialization data
+        (address[] memory guardians, uint256 recoveryDelay) = abi.decode(data, (address[], uint256));
+
+        if (recoveryDelay < MIN_RECOVERY_DELAY || recoveryDelay > MAX_RECOVERY_DELAY) {
+            revert RecoveryDelayTooShort();
+        }
+
+        _recoveryDelays[account] = recoveryDelay;
+        _initialized[account] = true;
+
+        // Add guardians
+        for (uint256 i = 0; i < guardians.length; i++) {
+            if (guardians[i] != address(0) && !_guardians[account][guardians[i]]) {
+                _guardians[account][guardians[i]] = true;
+                _guardianList[account].push(guardians[i]);
+                emit GuardianAdded(account, guardians[i]);
+            }
+        }
+
+        emit ModuleInstalled(account);
+    }
+
+    /**
+     * @inheritdoc IERC7579Module
+     * @dev Cleans up recovery configuration for the calling account
+     */
+    function onUninstall(bytes calldata /* data */) external override {
+        address account = msg.sender;
+
+        if (!_initialized[account]) {
+            revert NotInitialized(account);
+        }
+
+        // Cancel any pending recovery
+        if (_recoveryRequests[account].executeAfter > 0 && !_recoveryRequests[account].executed) {
+            delete _recoveryRequests[account];
+        }
+
+        // Remove all guardians
+        address[] storage guardians = _guardianList[account];
+        for (uint256 i = 0; i < guardians.length; i++) {
+            _guardians[account][guardians[i]] = false;
+        }
+        delete _guardianList[account];
+
+        // Clean up other state
+        delete _recoveryDelays[account];
+        _initialized[account] = false;
+
+        emit ModuleUninstalled(account);
+    }
+
+    /**
+     * @inheritdoc IERC7579Module
+     * @dev This is an Executor module (Type 2)
+     */
+    function isModuleType(uint256 moduleTypeId) external pure override returns (bool) {
+        return moduleTypeId == MODULE_TYPE;
+    }
+
+    /**
+     * @inheritdoc IERC7579Module
+     */
+    function isInitialized(address account) external view override returns (bool) {
+        return _initialized[account];
     }
 
     /*//////////////////////////////////////////////////////////////

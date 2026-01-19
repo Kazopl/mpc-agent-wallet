@@ -2,11 +2,13 @@
 pragma solidity ^0.8.24;
 
 import { ISpendingLimitHook } from "../interfaces/ISpendingLimitHook.sol";
+import { IERC7579Module } from "../interfaces/IERC7579Module.sol";
 
 /**
  * @title MpcSpendingLimitHook
  * @author MPC Agent Wallet SDK
  * @notice Spending limit enforcement module for MPC smart accounts
+ * @dev Implements IERC7579Module (Type 4: Hook) for ERC-7579 compatibility
  *
  * @dev Key features:
  *      - Per-transaction ETH limits
@@ -48,10 +50,13 @@ import { ISpendingLimitHook } from "../interfaces/ISpendingLimitHook.sol";
  * It validates spending against configured limits in preHook and
  * records actual spending in postHook.
  */
-contract MpcSpendingLimitHook is ISpendingLimitHook {
+contract MpcSpendingLimitHook is ISpendingLimitHook, IERC7579Module {
     /*//////////////////////////////////////////////////////////////
                                CONSTANTS
     //////////////////////////////////////////////////////////////*/
+
+    /// @notice ERC-7579 Hook module type ID
+    uint256 public constant MODULE_TYPE = 4;
 
     /// @notice Time period for daily limits
     uint256 public constant DAILY_PERIOD = 1 days;
@@ -83,6 +88,92 @@ contract MpcSpendingLimitHook is ISpendingLimitHook {
 
     /// @notice Whitelist per account (account => target => allowed)
     mapping(address => mapping(address => bool)) internal _whitelists;
+
+    /// @notice Tracks which accounts have initialized this module (ERC-7579)
+    mapping(address => bool) internal _initialized;
+
+    /*//////////////////////////////////////////////////////////////
+                       ERC-7579 MODULE FUNCTIONS
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @inheritdoc IERC7579Module
+     * @dev Initializes spending limits for the calling account
+     *      Data format: abi.encode(txLimit, dailyLimit, weeklyLimit, whitelistOnly)
+     */
+    function onInstall(bytes calldata data) external override {
+        address account = msg.sender;
+
+        if (_initialized[account]) {
+            revert AlreadyInitialized(account);
+        }
+
+        _initialized[account] = true;
+
+        // Decode and apply initial configuration if provided
+        if (data.length > 0) {
+            (uint256 txLimit, uint256 dailyLimit, uint256 weeklyLimit, bool whitelistOnly) =
+                abi.decode(data, (uint256, uint256, uint256, bool));
+
+            // Validate limits
+            if (dailyLimit > 0 && weeklyLimit > 0 && weeklyLimit < dailyLimit) {
+                revert InvalidLimit();
+            }
+
+            _configs[account] = SpendingConfig({
+                txLimit: txLimit,
+                dailyLimit: dailyLimit,
+                weeklyLimit: weeklyLimit,
+                whitelistOnly: whitelistOnly,
+                enabled: true
+            });
+
+            _trackers[account] = SpendingTracker({
+                dailySpent: 0,
+                weeklySpent: 0,
+                dailyResetTime: block.timestamp + DAILY_PERIOD,
+                weeklyResetTime: block.timestamp + WEEKLY_PERIOD
+            });
+
+            emit SpendingConfigured(account, txLimit, dailyLimit, weeklyLimit, whitelistOnly);
+        }
+
+        emit ModuleInstalled(account);
+    }
+
+    /**
+     * @inheritdoc IERC7579Module
+     * @dev Cleans up spending configuration for the calling account
+     */
+    function onUninstall(bytes calldata /* data */) external override {
+        address account = msg.sender;
+
+        if (!_initialized[account]) {
+            revert NotInitialized(account);
+        }
+
+        // Clean up all state for this account
+        delete _configs[account];
+        delete _trackers[account];
+        _initialized[account] = false;
+
+        emit ModuleUninstalled(account);
+    }
+
+    /**
+     * @inheritdoc IERC7579Module
+     * @dev This is a Hook module (Type 4)
+     */
+    function isModuleType(uint256 moduleTypeId) external pure override returns (bool) {
+        return moduleTypeId == MODULE_TYPE;
+    }
+
+    /**
+     * @inheritdoc IERC7579Module
+     */
+    function isInitialized(address account) external view override returns (bool) {
+        return _initialized[account];
+    }
 
     /*//////////////////////////////////////////////////////////////
                           CONFIGURATION
