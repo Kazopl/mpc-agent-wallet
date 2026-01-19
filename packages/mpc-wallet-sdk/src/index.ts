@@ -75,6 +75,9 @@ export {
 // Chain adapters
 export * from './chains';
 
+// Solana spending limits
+export * from './solana';
+
 // Storage
 export * from './storage';
 
