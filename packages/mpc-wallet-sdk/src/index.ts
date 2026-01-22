@@ -72,6 +72,22 @@ export {
   generateSessionKeyId,
 } from './session';
 
+// Paymaster for gasless transactions
+export {
+  PaymasterClient,
+  type PaymasterConfig,
+  type SponsorshipConfig,
+  type RemainingSponsorship,
+  type GlobalDailyStats,
+  type PackedUserOperation,
+  type SponsorOptions,
+  type SponsorResult,
+  packGasLimits,
+  packGasFees,
+  createEmptyUserOp,
+  estimateUserOpGas,
+} from './paymaster';
+
 // Chain adapters
 export * from './chains';
 

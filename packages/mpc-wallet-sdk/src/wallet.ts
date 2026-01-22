@@ -4,6 +4,14 @@
 
 import type { KeyShare, KeygenConfig } from './keygen';
 import { KeygenSession } from './keygen';
+import type {
+  PaymasterConfig,
+  PackedUserOperation,
+  SponsorResult,
+  SponsorOptions,
+  RemainingSponsorship,
+} from './paymaster';
+import { PaymasterClient } from './paymaster';
 import type { PolicyDecision } from './policy';
 import { PolicyConfig, PolicyEngine } from './policy';
 import type {
@@ -38,6 +46,8 @@ export interface WalletConfig {
   storage?: KeyShareStore;
   /** Existing key share to load */
   keyShare?: KeyShare;
+  /** Paymaster configuration for gasless transactions */
+  paymaster?: PaymasterConfig;
 }
 
 /**
@@ -75,6 +85,7 @@ export class MpcAgentWallet {
   private keyShare: KeyShare | null = null;
   private policyEngine: PolicyEngine | null = null;
   private sessionKeyManager: SessionKeyManager;
+  private paymasterClient: PaymasterClient | null = null;
   private storage: KeyShareStore;
   private role: PartyRole;
 
@@ -89,6 +100,10 @@ export class MpcAgentWallet {
 
     if (config.keyShare) {
       this.keyShare = config.keyShare;
+    }
+
+    if (config.paymaster) {
+      this.paymasterClient = new PaymasterClient(config.paymaster);
     }
   }
 
@@ -447,6 +462,138 @@ export class MpcAgentWallet {
    */
   getSessionKeyManager(): SessionKeyManager {
     return this.sessionKeyManager;
+  }
+
+  // ============================================================================
+  // Paymaster (Gasless Transactions)
+  // ============================================================================
+
+  /**
+   * Configure a paymaster for gasless transactions
+   *
+   * @param config - Paymaster configuration
+   *
+   * @example
+   * ```typescript
+   * wallet.setPaymaster({
+   *   paymasterAddress: '0x...',
+   *   entryPointAddress: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
+   *   rpcUrl: 'https://...',
+   * });
+   * ```
+   */
+  setPaymaster(config: PaymasterConfig): void {
+    this.paymasterClient = new PaymasterClient(config);
+  }
+
+  /**
+   * Get the paymaster client for advanced operations
+   *
+   * @returns PaymasterClient or null if not configured
+   */
+  getPaymasterClient(): PaymasterClient | null {
+    return this.paymasterClient;
+  }
+
+  /**
+   * Check if a paymaster is configured
+   */
+  hasPaymaster(): boolean {
+    return this.paymasterClient !== null;
+  }
+
+  /**
+   * Check if the wallet is sponsored by the paymaster
+   *
+   * @returns True if the wallet is sponsored and can have gas paid
+   *
+   * @example
+   * ```typescript
+   * if (await wallet.isSponsored()) {
+   *   // Can execute gasless transactions
+   *   const sponsoredOp = await wallet.sponsorUserOperation(userOp);
+   * }
+   * ```
+   */
+  async isSponsored(): Promise<boolean> {
+    if (!this.paymasterClient) {
+      return false;
+    }
+    if (!this.keyShare) {
+      throw new MpcWalletError(
+        ErrorCode.InvalidConfig,
+        'No key share loaded'
+      );
+    }
+    return this.paymasterClient.isSponsored(this.keyShare.ethAddress as Address);
+  }
+
+  /**
+   * Get remaining gas sponsorship for the wallet
+   *
+   * @returns Remaining total and daily sponsorship amounts
+   *
+   * @example
+   * ```typescript
+   * const { totalRemaining, dailyRemaining } = await wallet.getRemainingSponsorship();
+   * console.log(`Can sponsor up to ${totalRemaining} wei total`);
+   * console.log(`Can sponsor up to ${dailyRemaining} wei today`);
+   * ```
+   */
+  async getRemainingSponsorship(): Promise<RemainingSponsorship> {
+    if (!this.paymasterClient) {
+      throw new MpcWalletError(
+        ErrorCode.InvalidConfig,
+        'Paymaster not configured'
+      );
+    }
+    if (!this.keyShare) {
+      throw new MpcWalletError(
+        ErrorCode.InvalidConfig,
+        'No key share loaded'
+      );
+    }
+    return this.paymasterClient.getRemainingSponsorship(
+      this.keyShare.ethAddress as Address
+    );
+  }
+
+  /**
+   * Sponsor a UserOperation for gasless execution
+   *
+   * Adds paymaster data to the UserOperation so gas costs are paid
+   * by the paymaster instead of the account.
+   *
+   * @param userOp - UserOperation to sponsor (without paymasterAndData)
+   * @param options - Optional sponsor configuration
+   * @returns Sponsored UserOperation with paymaster data
+   *
+   * @example
+   * ```typescript
+   * // Create a UserOperation
+   * const userOp = createEmptyUserOp(walletAddress);
+   * userOp.callData = encodeExecute(recipient, value, data);
+   *
+   * // Sponsor it for gasless execution
+   * const { userOp: sponsoredOp, maxCost } = await wallet.sponsorUserOperation(userOp);
+   *
+   * // Sign and submit the sponsored operation
+   * const signature = await wallet.signUserOp(sponsoredOp);
+   * sponsoredOp.signature = signature;
+   * // Submit to bundler...
+   * ```
+   */
+  async sponsorUserOperation(
+    userOp: PackedUserOperation,
+    options?: SponsorOptions
+  ): Promise<SponsorResult> {
+    if (!this.paymasterClient) {
+      throw new MpcWalletError(
+        ErrorCode.InvalidConfig,
+        'Paymaster not configured'
+      );
+    }
+    return this.paymasterClient.sponsorUserOperation(userOp, options);
   }
 
   // ============================================================================
