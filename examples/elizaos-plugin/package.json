@@ -1,5 +1,5 @@
 {
-  "name": "@mpc-wallet/elizaos-plugin",
+  "name": "@elizaos/plugin-mpc-wallet",
   "version": "1.0.0",
   "description": "ElizaOS plugin for MPC Agent Wallet",
   "type": "module",
@@ -12,21 +12,25 @@
     }
   },
   "scripts": {
-    "build": "tsc",
-    "dev": "tsc --watch",
-    "test": "vitest"
+    "build": "tsup src/index.ts --format esm --dts",
+    "dev": "tsup src/index.ts --format esm --dts --watch",
+    "lint": "prettier --write ./src",
+    "test": "bun test"
   },
   "dependencies": {
+    "@elizaos/core": "^2.0.0-alpha.2",
     "@mpc-wallet/sdk": "^0.1.0",
     "viem": "^2.44.0"
   },
   "devDependencies": {
-    "@elizaos/core": "^1.0.14",
+    "@types/bun": "latest",
     "@types/node": "^22.10.0",
-    "typescript": "^5.7.0",
-    "vitest": "^2.1.0"
+    "bun": "^1.2.15",
+    "prettier": "^3.0.0",
+    "tsup": "8.3.5",
+    "typescript": "^5.7.0"
   },
   "peerDependencies": {
-    "@elizaos/core": ">=1.0.0"
+    "@elizaos/core": ">=2.0.0-alpha"
   }
 }
