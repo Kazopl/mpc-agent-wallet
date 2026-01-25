@@ -2,30 +2,21 @@
  * Swap Action
  *
  * Swap tokens via DEX (Uniswap)
+ *
+ * Updated for ElizaOS v2.0 - Returns ActionResult with required success field
  */
 
+import type {
+  Action,
+  ActionResult,
+  IAgentRuntime,
+  Memory,
+  State,
+  HandlerCallback,
+} from '@elizaos/core';
 import type { PluginContext } from '../plugin.js';
 import { ChainType, type TransactionRequest } from '@mpc-wallet/sdk';
-import { parseUnits, encodeFunctionData } from 'viem';
-
-interface SwapParams {
-  tokenIn: string;
-  tokenOut: string;
-  amountIn: string;
-  slippage?: number;
-  chain?: string;
-}
-
-interface SwapResult {
-  status: 'pending_approval' | 'rejected';
-  requestId: string;
-  quote?: {
-    amountIn: string;
-    amountOutMin: string;
-    priceImpact: string;
-  };
-  reason?: string;
-}
+import { parseUnits } from 'viem';
 
 // Well-known token addresses
 const TOKENS: Record<string, Record<string, string>> = {
@@ -44,142 +35,6 @@ const UNISWAP_ROUTER: Record<string, string> = {
   polygon: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
   arbitrum: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45',
 };
-
-export function swapAction(context: PluginContext) {
-  return {
-    name: 'wallet:swap',
-    description: 'Swap tokens via Uniswap. Requires user approval.',
-    parameters: {
-      type: 'object',
-      properties: {
-        tokenIn: {
-          type: 'string',
-          description: 'Token to swap from (address or symbol like WETH, USDC)',
-        },
-        tokenOut: {
-          type: 'string',
-          description: 'Token to swap to (address or symbol)',
-        },
-        amountIn: {
-          type: 'string',
-          description: 'Amount of tokenIn to swap',
-        },
-        slippage: {
-          type: 'number',
-          description: 'Maximum slippage percentage (default: 0.5)',
-          default: 0.5,
-        },
-        chain: {
-          type: 'string',
-          description: 'Blockchain (ethereum, polygon, arbitrum)',
-          default: 'ethereum',
-        },
-      },
-      required: ['tokenIn', 'tokenOut', 'amountIn'],
-    },
-
-    async handler(params: SwapParams): Promise<SwapResult> {
-      const {
-        tokenIn,
-        tokenOut,
-        amountIn,
-        slippage = 0.5,
-        chain = 'ethereum',
-      } = params;
-
-      if (!context.wallet.hasKeyShare()) {
-        throw new Error('Wallet not initialized - no key share loaded');
-      }
-
-      // Resolve token addresses
-      const tokenInAddress = resolveToken(tokenIn, chain);
-      const tokenOutAddress = resolveToken(tokenOut, chain);
-
-      // Get router address
-      const routerAddress = UNISWAP_ROUTER[chain];
-      if (!routerAddress) {
-        throw new Error(`Uniswap not supported on ${chain}`);
-      }
-
-      // Build swap transaction
-      // In production, this would:
-      // 1. Get quote from Uniswap
-      // 2. Build proper swap calldata
-      // 3. Include deadline and slippage protection
-
-      const amountInWei = parseUnits(amountIn, 18); // Assume 18 decimals
-
-      // Simulated quote (in production, fetch from Uniswap API)
-      const quote = {
-        amountIn: amountInWei.toString(),
-        amountOutMin: (amountInWei * BigInt(100 - Math.floor(slippage * 100)) / BigInt(100)).toString(),
-        priceImpact: '0.1%',
-      };
-
-      // Create transaction request
-      const tx: TransactionRequest = {
-        requestId: crypto.randomUUID(),
-        chain: ChainType.Evm,
-        to: routerAddress,
-        value: tokenInAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
-          ? amountInWei.toString()
-          : '0',
-        data: '0x...', // In production, encode actual swap calldata
-        chainId: getChainId(chain),
-        timestamp: Date.now(),
-        metadata: {
-          type: 'swap',
-          tokenIn: tokenInAddress,
-          tokenOut: tokenOutAddress,
-          amountIn,
-          slippage,
-        },
-      };
-
-      // Check policy
-      const policyResult = context.wallet.evaluatePolicy(tx);
-
-      if (!policyResult.approved) {
-        return {
-          status: 'rejected',
-          requestId: tx.requestId,
-          reason: policyResult.reason,
-        };
-      }
-
-      // Return pending approval with quote
-      return {
-        status: 'pending_approval',
-        requestId: tx.requestId,
-        quote,
-      };
-    },
-
-    examples: [
-      {
-        user: 'Swap 1 ETH for USDC',
-        assistant: "I'll prepare a swap of 1 ETH for USDC via Uniswap.",
-        action: {
-          tokenIn: 'WETH',
-          tokenOut: 'USDC',
-          amountIn: '1',
-          slippage: 0.5,
-          chain: 'ethereum',
-        },
-      },
-      {
-        user: 'Exchange 500 USDC for DAI with 0.1% slippage',
-        assistant: "I'll swap 500 USDC to DAI with minimal slippage.",
-        action: {
-          tokenIn: 'USDC',
-          tokenOut: 'DAI',
-          amountIn: '500',
-          slippage: 0.1,
-        },
-      },
-    ],
-  };
-}
 
 function resolveToken(token: string, chain: string): string {
   // Check if it's already an address
@@ -205,4 +60,194 @@ function getChainId(chain: string): number {
     arbitrum: 42161,
   };
   return chainIds[chain] ?? 1;
+}
+
+/**
+ * Factory function for creating a swap action with a specific context
+ * (Legacy pattern - use for custom implementations)
+ */
+export function swapAction(context: PluginContext): Action {
+  return {
+    name: 'WALLET_SWAP',
+    description: 'Swap tokens via Uniswap. Requires user approval.',
+    similes: ['swap tokens', 'exchange', 'trade', 'swap eth', 'swap usdc'],
+
+    validate: async (_runtime: IAgentRuntime, message: Memory, _state?: State): Promise<boolean> => {
+      const text = (message.content as any).text?.toLowerCase() ?? '';
+      return (
+        text.includes('swap') ||
+        text.includes('exchange') ||
+        text.includes('trade')
+      );
+    },
+
+    handler: async (
+      _runtime: IAgentRuntime,
+      message: Memory,
+      _state?: State,
+      _options?: any,
+      callback?: HandlerCallback
+    ): Promise<ActionResult> => {
+      try {
+        // Extract parameters from message (in production, use NLP extraction)
+        const text = (message.content as any).text?.toLowerCase() ?? '';
+
+        // Simple extraction (production should use proper NLP)
+        const amountMatch = text.match(/(\d+\.?\d*)/);
+        const amountIn = amountMatch?.[1] ?? '1';
+
+        // Default tokens - in production, extract from message
+        let tokenIn = 'ETH';
+        let tokenOut = 'USDC';
+        const slippage = 0.5;
+        let chain = 'ethereum';
+
+        // Simple token detection
+        if (text.includes('usdc') && text.includes('dai')) {
+          tokenIn = 'USDC';
+          tokenOut = 'DAI';
+        } else if (text.includes('eth') && text.includes('usdc')) {
+          tokenIn = 'WETH';
+          tokenOut = 'USDC';
+        }
+
+        // Chain detection
+        if (text.includes('polygon')) chain = 'polygon';
+        if (text.includes('arbitrum')) chain = 'arbitrum';
+
+        if (!context.wallet.hasKeyShare()) {
+          await callback?.({
+            text: 'Wallet not initialized - no key share loaded.',
+            action: 'WALLET_SWAP',
+          });
+          return {
+            success: false,
+            error: new Error('No key share loaded'),
+          };
+        }
+
+        // Resolve token addresses
+        let tokenInAddress: string;
+        let tokenOutAddress: string;
+        try {
+          tokenInAddress = resolveToken(tokenIn, chain);
+          tokenOutAddress = resolveToken(tokenOut, chain);
+        } catch (error) {
+          await callback?.({
+            text: `Unknown token: ${error instanceof Error ? error.message : 'Invalid token'}`,
+            action: 'WALLET_SWAP',
+          });
+          return {
+            success: false,
+            error: error instanceof Error ? error : new Error(String(error)),
+          };
+        }
+
+        // Get router address
+        const routerAddress = UNISWAP_ROUTER[chain];
+        if (!routerAddress) {
+          await callback?.({
+            text: `Uniswap not supported on ${chain}`,
+            action: 'WALLET_SWAP',
+          });
+          return {
+            success: false,
+            error: new Error(`Uniswap not supported on ${chain}`),
+          };
+        }
+
+        const amountInWei = parseUnits(amountIn, 18); // Assume 18 decimals
+
+        // Simulated quote (in production, fetch from Uniswap API)
+        const quote = {
+          amountIn: amountInWei.toString(),
+          amountOutMin: (amountInWei * BigInt(100 - Math.floor(slippage * 100)) / BigInt(100)).toString(),
+          priceImpact: '0.1%',
+        };
+
+        // Create transaction request
+        const tx: TransactionRequest = {
+          requestId: crypto.randomUUID(),
+          chain: ChainType.Evm,
+          to: routerAddress,
+          value: tokenInAddress.toLowerCase() === '0xeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee'
+            ? amountInWei.toString()
+            : '0',
+          data: '0x...', // In production, encode actual swap calldata
+          chainId: getChainId(chain),
+          timestamp: Date.now(),
+          metadata: {
+            type: 'swap',
+            tokenIn: tokenInAddress,
+            tokenOut: tokenOutAddress,
+            amountIn,
+            slippage,
+          },
+        };
+
+        // Check policy
+        const policyResult = context.wallet.evaluatePolicy(tx);
+
+        if (!policyResult.approved) {
+          await callback?.({
+            text: `Swap rejected by policy: ${policyResult.reason}`,
+            action: 'WALLET_SWAP',
+          });
+          return {
+            success: false,
+            text: 'Policy rejected',
+            data: {
+              actionName: 'WALLET_SWAP',
+              status: 'rejected',
+              requestId: tx.requestId,
+              reason: policyResult.reason,
+            },
+          };
+        }
+
+        await callback?.({
+          text: `Swap prepared.\n\nFrom: ${amountIn} ${tokenIn}\nTo: ${tokenOut}\nSlippage: ${slippage}%\nChain: ${chain}\nRequest ID: ${tx.requestId}\n\nPlease check your mobile app to approve.`,
+          action: 'WALLET_SWAP',
+        });
+
+        return {
+          success: true,
+          text: 'Swap pending approval',
+          values: {
+            requestId: tx.requestId,
+            tokenIn,
+            tokenOut,
+            amountIn,
+            chain,
+            status: 'pending_approval',
+          },
+          data: {
+            actionName: 'WALLET_SWAP',
+            status: 'pending_approval',
+            requestId: tx.requestId,
+            quote,
+          },
+        };
+      } catch (error) {
+        await callback?.({
+          text: 'Failed to prepare swap.',
+        });
+        return {
+          success: false,
+          error: error instanceof Error ? error : new Error(String(error)),
+        };
+      }
+    },
+
+    examples: [
+      [
+        { name: 'user', content: { text: 'Swap 1 ETH for USDC' } },
+        { name: 'assistant', content: { text: "I'll prepare a swap of 1 ETH for USDC via Uniswap.", action: 'WALLET_SWAP' } },
+      ],
+      [
+        { name: 'user', content: { text: 'Exchange 500 USDC for DAI' } },
+        { name: 'assistant', content: { text: "I'll swap 500 USDC to DAI.", action: 'WALLET_SWAP' } },
+      ],
+    ],
+  };
 }
