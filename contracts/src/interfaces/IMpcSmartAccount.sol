@@ -165,6 +165,38 @@ interface IMpcSmartAccount {
     function cancelDelayed(bytes32 txHash) external;
 
     /*//////////////////////////////////////////////////////////////
+                     ERC-7710 DELEGATION EXECUTION
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Execute a call from the ERC-7710 delegation manager
+     * @dev Only callable by the registered delegation manager
+     * @param target Address to call
+     * @param value ETH value to send
+     * @param data Call data
+     * @return returnData Return data from the call
+     */
+    function executeFromDelegation(
+        address target,
+        uint256 value,
+        bytes calldata data
+    ) external returns (bytes memory returnData);
+
+    /**
+     * @notice Execute a batch of calls from the ERC-7710 delegation manager
+     * @dev Only callable by the registered delegation manager
+     * @param targets Addresses to call
+     * @param values ETH values to send
+     * @param datas Call data array
+     * @return returnDatas Return data from each call
+     */
+    function executeFromDelegationBatch(
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata datas
+    ) external returns (bytes[] memory returnDatas);
+
+    /*//////////////////////////////////////////////////////////////
                                GETTERS
     //////////////////////////////////////////////////////////////*/
 

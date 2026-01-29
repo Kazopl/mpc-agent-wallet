@@ -225,4 +225,29 @@ interface ISessionKeyModule {
      * @return True if allowed or selectors list is empty (all allowed)
      */
     function isSelectorAllowed(address account, address signer, bytes4 selector) external view returns (bool);
+
+    /*//////////////////////////////////////////////////////////////
+                    ERC-7715 PERMISSION CONTEXT
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Create a session key from an ERC-7715 permission context
+     * @dev Validates the permission context signature and creates a session key
+     * @param permissionContext Encoded ERC-7715 permission context
+     */
+    function createSessionKeyFromPermission(bytes calldata permissionContext) external;
+
+    /**
+     * @notice Get the session key signer associated with a permission ID
+     * @param account The smart account address
+     * @param permissionId The ERC-7715 permission ID
+     * @return The signer address (or zero if not found)
+     */
+    function getSignerForPermission(address account, bytes32 permissionId) external view returns (address);
+
+    /**
+     * @notice Revoke a session key by its associated permission ID
+     * @param permissionId The ERC-7715 permission ID
+     */
+    function revokeSessionKeyByPermission(bytes32 permissionId) external;
 }

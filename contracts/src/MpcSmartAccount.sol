@@ -5,6 +5,7 @@ import { IMpcSmartAccount } from "./interfaces/IMpcSmartAccount.sol";
 import { IEntryPoint } from "./interfaces/IEntryPoint.sol";
 import { ISessionKeyModule } from "./interfaces/ISessionKeyModule.sol";
 import { IDelayModule } from "./interfaces/IDelayModule.sol";
+import { IERC7710 } from "./interfaces/IERC7710.sol";
 import {
     IERC7579Module,
     IERC7579AccountConfig,
@@ -135,6 +136,9 @@ contract MpcSmartAccount is
     /// @notice Thrown when module address is invalid
     error InvalidModuleAddress();
 
+    /// @notice Thrown when caller is not the delegation manager
+    error OnlyDelegationManager();
+
     /*//////////////////////////////////////////////////////////////
                             IMMUTABLE STATE
     //////////////////////////////////////////////////////////////*/
@@ -166,6 +170,9 @@ contract MpcSmartAccount is
 
     /// @notice Delay module address for high-value transaction delays
     address public delayModule;
+
+    /// @notice ERC-7710 delegation manager address
+    address public delegationManager;
 
     /// @notice Current session key signer (set during validation, used in execution)
     address internal _currentSessionKeySigner;
@@ -238,6 +245,16 @@ contract MpcSmartAccount is
         _;
     }
 
+    /**
+     * @notice Restrict to delegation manager calls
+     */
+    modifier onlyDelegationManager() {
+        if (msg.sender != delegationManager) {
+            revert OnlyDelegationManager();
+        }
+        _;
+    }
+
     /*//////////////////////////////////////////////////////////////
                              CONSTRUCTOR
     //////////////////////////////////////////////////////////////*/
@@ -295,6 +312,16 @@ contract MpcSmartAccount is
         address _delayModule
     ) external onlySelfOrRecovery {
         delayModule = _delayModule;
+    }
+
+    /**
+     * @notice Set the ERC-7710 delegation manager address
+     * @param _delegationManager Address of the delegation manager
+     */
+    function setDelegationManager(
+        address _delegationManager
+    ) external onlySelfOrRecovery {
+        delegationManager = _delegationManager;
     }
 
     /*//////////////////////////////////////////////////////////////
@@ -565,6 +592,97 @@ contract MpcSmartAccount is
             // Record total spending
             _recordSpending(totalValue);
         }
+
+        returnDatas = new bytes[](length);
+
+        for (uint256 i = 0; i < length; i++) {
+            bool success;
+            (success, returnDatas[i]) = targets[i].call{ value: values[i] }(datas[i]);
+
+            if (!success) {
+                revert ExecutionFailed(targets[i], returnDatas[i]);
+            }
+        }
+
+        emit TransactionBatchExecuted(targets, values, datas);
+    }
+
+    /*//////////////////////////////////////////////////////////////
+                       ERC-7710 DELEGATION EXECUTION
+    //////////////////////////////////////////////////////////////*/
+
+    /**
+     * @notice Execute a call from the ERC-7710 delegation manager
+     * @dev Only callable by the registered delegation manager.
+     *      This enables AI agents and dapps to execute transactions
+     *      using permissions granted via ERC-7715.
+     *
+     * Flow:
+     * 1. AI agent obtains permission via wallet_requestExecutionPermissions (ERC-7715)
+     * 2. Agent calls ERC7710DelegationManager.redeemDelegation()
+     * 3. Delegation manager validates the permission context
+     * 4. Delegation manager calls this function to execute the action
+     *
+     * @param target Address to call
+     * @param value ETH value to send
+     * @param data Call data
+     * @return returnData Return data from the call
+     */
+    function executeFromDelegation(
+        address target,
+        uint256 value,
+        bytes calldata data
+    ) external onlyDelegationManager returns (bytes memory returnData) {
+        // Record spending for account-level daily limit tracking
+        _recordSpending(value);
+
+        // Check if delay is required for high-value transactions
+        if (_requiresDelay(value)) {
+            // Queue transaction for delayed execution
+            bytes32 txHash = IDelayModule(delayModule).queueTransaction(target, value, data);
+            // Return the tx hash encoded as return data
+            return abi.encode(txHash);
+        }
+
+        // Execute call immediately
+        bool success;
+        (success, returnData) = target.call{ value: value }(data);
+
+        if (!success) {
+            revert ExecutionFailed(target, returnData);
+        }
+
+        emit TransactionExecuted(target, value, data, returnData);
+    }
+
+    /**
+     * @notice Execute a batch of calls from the ERC-7710 delegation manager
+     * @dev Only callable by the registered delegation manager.
+     *      Executes multiple actions in a single transaction.
+     *
+     * @param targets Addresses to call
+     * @param values ETH values to send
+     * @param datas Call data array
+     * @return returnDatas Return data from each call
+     */
+    function executeFromDelegationBatch(
+        address[] calldata targets,
+        uint256[] calldata values,
+        bytes[] calldata datas
+    ) external onlyDelegationManager returns (bytes[] memory returnDatas) {
+        uint256 length = targets.length;
+        if (length != values.length || length != datas.length) {
+            revert InvalidArrayLength();
+        }
+
+        // Calculate total value for spending limit
+        uint256 totalValue = 0;
+        for (uint256 i = 0; i < length; i++) {
+            totalValue += values[i];
+        }
+
+        // Record total spending
+        _recordSpending(totalValue);
 
         returnDatas = new bytes[](length);
 
