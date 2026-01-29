@@ -28,7 +28,7 @@
  */
 
 // Core wallet class
-export { MpcAgentWallet, type WalletConfig } from './wallet';
+export { MpcAgentWallet, type WalletConfig, type ERC7715Config } from './wallet';
 
 // Key generation
 export {
@@ -102,6 +102,15 @@ export * from './types';
 
 // Utilities
 export * from './utils';
+
+// ERC-7715 (Wallet Execution Permissions)
+export * as erc7715 from './erc7715';
+export {
+  ERC7715Provider,
+  PermissionRequestBuilder,
+  createERC7715Provider,
+  type ERC7715ProviderConfig,
+} from './erc7715';
 
 // Version
 export const VERSION = '0.1.0';

@@ -28,11 +28,18 @@ import { MemoryStore } from './storage';
 import type {
   Address,
   ChainType,
+  HexString,
   PartyRole,
   TransactionParams,
   TransactionRequest,
 } from './types';
 import { MpcWalletError, ErrorCode } from './types';
+import type { ChainIdHex, Action, PermissionsContext } from './erc7715/types';
+import {
+  ERC7715Provider,
+  type ERC7715ProviderConfig,
+} from './erc7715/provider';
+import { PermissionManager } from './erc7715/manager';
 
 /**
  * Configuration for creating an MPC wallet
@@ -48,6 +55,25 @@ export interface WalletConfig {
   keyShare?: KeyShare;
   /** Paymaster configuration for gasless transactions */
   paymaster?: PaymasterConfig;
+}
+
+/**
+ * Configuration for ERC-7715 provider
+ */
+export interface ERC7715Config {
+  /** Chain ID in hex format (e.g., '0x1' for mainnet) */
+  chainId: ChainIdHex;
+  /** Callback to prompt user for approval of permission requests */
+  onApprovalRequest?: (request: unknown) => Promise<boolean>;
+  /** Callback when a permission is granted */
+  onPermissionGranted?: (response: unknown) => void;
+  /** Callback when a permission is revoked */
+  onPermissionRevoked?: (response: unknown) => void;
+  /** Callback to sign and execute actions through the smart account */
+  onExecuteActions?: (
+    context: PermissionsContext,
+    actions: readonly Action[]
+  ) => Promise<HexString>;
 }
 
 /**
@@ -594,6 +620,85 @@ export class MpcAgentWallet {
       );
     }
     return this.paymasterClient.sponsorUserOperation(userOp, options);
+  }
+
+  // ============================================================================
+  // ERC-7715 (Wallet Execution Permissions)
+  // ============================================================================
+
+  /**
+   * Get an ERC-7715 compatible provider for handling permission requests
+   *
+   * ERC-7715 defines a standard JSON-RPC interface for dapps and AI agents
+   * to request fine-grained permissions from wallets to execute transactions
+   * on the user's behalf.
+   *
+   * The returned provider integrates with the wallet's session key system
+   * to create and manage delegated execution permissions.
+   *
+   * @param config - Configuration for the ERC-7715 provider
+   * @returns EIP-1193 compatible provider for ERC-7715 methods
+   *
+   * @example
+   * ```typescript
+   * // Get the ERC-7715 provider
+   * const provider = wallet.getERC7715Provider({
+   *   chainId: '0x1' as ChainIdHex,
+   *   onApprovalRequest: async (request) => {
+   *     // Show approval UI to user
+   *     return await showApprovalDialog(request);
+   *   },
+   *   onExecuteActions: async (context, actions) => {
+   *     // Execute through smart account
+   *     return await smartAccount.execute(context, actions);
+   *   },
+   * });
+   *
+   * // Request permissions from the wallet
+   * const permission = await provider.requestPermissions({
+   *   chainId: '0x1',
+   *   expiry: Math.floor(Date.now() / 1000) + 86400, // 24 hours
+   *   signer: { type: 'account', data: { id: agentAddress } },
+   *   permissions: [{
+   *     type: 'native-token-transfer',
+   *     data: { allowance: '0xDE0B6B3A7640000' }, // 1 ETH
+   *     required: true,
+   *   }],
+   * });
+   *
+   * // Execute with granted permission
+   * const txHash = await provider.executeWithPermission(
+   *   permission.permissionsContext,
+   *   [{ to: recipient, value: '0x38D7EA4C68000', data: '0x' }]
+   * );
+   * ```
+   */
+  getERC7715Provider(config: ERC7715Config): ERC7715Provider {
+    if (!this.keyShare) {
+      throw new MpcWalletError(
+        ErrorCode.InvalidConfig,
+        'No key share loaded - cannot create ERC-7715 provider'
+      );
+    }
+
+    // Create a permission manager that uses this wallet's session key manager
+    const permissionManager = new PermissionManager({
+      supportedChains: [config.chainId],
+      sessionKeyManager: this.sessionKeyManager,
+    });
+
+    // Create the ERC-7715 provider
+    const providerConfig: ERC7715ProviderConfig = {
+      accountAddress: this.keyShare.ethAddress as Address,
+      chainId: config.chainId,
+      permissionManager,
+      onApprovalRequest: config.onApprovalRequest as ERC7715ProviderConfig['onApprovalRequest'],
+      onPermissionGranted: config.onPermissionGranted as ERC7715ProviderConfig['onPermissionGranted'],
+      onPermissionRevoked: config.onPermissionRevoked as ERC7715ProviderConfig['onPermissionRevoked'],
+      onExecuteActions: config.onExecuteActions,
+    };
+
+    return new ERC7715Provider(providerConfig);
   }
 
   // ============================================================================

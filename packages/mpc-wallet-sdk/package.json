@@ -1,6 +1,6 @@
 {
   "name": "@mpc-wallet/sdk",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "TypeScript SDK for MPC-secured AI agent wallets with 2-of-3 threshold signing",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
@@ -10,6 +10,11 @@
       "types": "./dist/index.d.ts",
       "import": "./dist/index.mjs",
       "require": "./dist/index.js"
+    },
+    "./erc7715": {
+      "types": "./dist/erc7715/index.d.ts",
+      "import": "./dist/erc7715/index.mjs",
+      "require": "./dist/erc7715/index.js"
     },
     "./wasm": {
       "types": "./dist/wasm/index.d.ts",
@@ -60,8 +65,7 @@
   },
   "homepage": "https://github.com/Kazopl/mpc-agent-wallet#readme",
   "publishConfig": {
-    "access": "public",
-    "provenance": true
+    "access": "public"
   },
   "engines": {
     "node": ">=20.0.0"
