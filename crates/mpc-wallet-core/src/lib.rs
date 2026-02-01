@@ -44,12 +44,15 @@
 //!
 //! All signing operations pass through the policy engine before MPC execution.
 
+pub mod agent_identity;
 pub mod chain;
 pub mod error;
 pub mod keygen;
 pub mod policy;
+pub mod reputation;
 pub mod sign;
 pub mod types;
+pub mod validation;
 
 // Runtime-dependent modules (require tokio)
 #[cfg(feature = "runtime")]
@@ -57,8 +60,20 @@ pub mod mpc;
 #[cfg(feature = "runtime")]
 pub mod storage;
 
+pub use agent_identity::{
+    AgentIdentity, AgentIdentityManager, AgentRegistrationConfig, AgentRegistrationFile,
+    AgentService, IDENTITY_REGISTRY_ADDRESS,
+};
 pub use error::{Error, Result};
 pub use policy::{PolicyConfig, PolicyDecision, PolicyEngine};
+pub use reputation::{
+    FeedbackParams, FeedbackSignal, ReputationManager, ReputationSummary,
+    REPUTATION_REGISTRY_ADDRESS,
+};
+pub use validation::{
+    TeeAttestation, TrustModel, ValidationManager, ValidationRequest, ValidationRequestParams,
+    ValidationResponse, ZkMlProof, VALIDATION_REGISTRY_ADDRESS,
+};
 
 #[cfg(feature = "runtime")]
 pub use storage::{EncryptedKeyShare, KeyShareStore};
