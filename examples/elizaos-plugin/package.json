@@ -19,7 +19,7 @@
   },
   "dependencies": {
     "@elizaos/core": "^2.0.0-alpha.2",
-    "@mpc-wallet/sdk": "^0.1.0",
+    "@mpc-wallet/sdk": "^0.3.0",
     "viem": "^2.44.0"
   },
   "devDependencies": {

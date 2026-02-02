@@ -1,7 +1,7 @@
 /**
  * MPC Wallet Plugin for ElizaOS
  *
- * Updated for ElizaOS v2.0 API
+ * Updated for ElizaOS v2.0 API with ERC-8004 integration
  */
 
 /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -20,7 +20,6 @@ import {
   logger,
 } from '@elizaos/core';
 
-// Re-export ActionResult for use in action files
 export type { ActionResult };
 import {
   MpcAgentWallet,
@@ -28,6 +27,36 @@ import {
   PolicyConfig,
   ChainType,
 } from '@mpc-wallet/sdk';
+
+import {
+  registerAgentAction,
+  updateAgentProfileAction,
+  getAgentIdentityAction,
+} from './actions/identity.js';
+
+import {
+  checkReputationAction,
+  giveFeedbackAction,
+  revokeFeedbackAction,
+} from './actions/reputation.js';
+
+import {
+  requestValidationAction,
+  checkValidationStatusAction,
+  listValidatorRequestsAction,
+} from './actions/validation.js';
+
+const erc8004Actions: Action[] = [
+  registerAgentAction,
+  updateAgentProfileAction,
+  getAgentIdentityAction,
+  checkReputationAction,
+  giveFeedbackAction,
+  revokeFeedbackAction,
+  requestValidationAction,
+  checkValidationStatusAction,
+  listValidatorRequestsAction,
+];
 
 export interface MpcWalletPluginConfig {
   /** Password for decrypting key share */
@@ -526,8 +555,8 @@ const addressAction: Action = {
  */
 export const mpcWalletPlugin: Plugin = {
   name: 'mpc-wallet',
-  description: 'Secure MPC wallet for AI agents with threshold signing',
-  actions: [balanceAction, sendAction, policyAction, addressAction],
+  description: 'Secure MPC wallet for AI agents with threshold signing and ERC-8004 identity',
+  actions: [balanceAction, sendAction, policyAction, addressAction, ...erc8004Actions],
   services: [MpcWalletService],
   providers: [],
   evaluators: [],

@@ -1,6 +1,6 @@
 {
   "name": "@mpc-wallet/sdk",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TypeScript SDK for MPC-secured AI agent wallets with 2-of-3 threshold signing",
   "main": "dist/index.js",
   "module": "dist/index.mjs",
