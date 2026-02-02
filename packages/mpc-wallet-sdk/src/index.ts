@@ -112,6 +112,56 @@ export {
   type ERC7715ProviderConfig,
 } from './erc7715';
 
+// ERC-8004 (Agent Identity, Reputation, Validation)
+export {
+  AgentIdentityAPI,
+  AgentRegistrationBuilder,
+  TrustModel,
+  trustModelToString,
+  trustModelFromString,
+  IDENTITY_REGISTRY_ADDRESS,
+  type AgentIdentityAPIConfig,
+  type AgentIdentity,
+  type AgentRegistrationFile,
+  type AgentRegistrationConfig,
+  type AgentService,
+  type AgentCapability,
+  type RegisterAgentParams,
+  type SetAgentWalletParams,
+  type UploadResult,
+  type IpfsUploader,
+} from './agent-identity';
+
+export {
+  ReputationAPI,
+  FeedbackBuilder,
+  SummaryQueryBuilder,
+  calculateWeightedReputationScore,
+  REPUTATION_REGISTRY_ADDRESS,
+  type ReputationAPIConfig,
+  type FeedbackSignal,
+  type ReputationSummary,
+  type SummaryFilters,
+  type FeedbackParams,
+  type SummaryQueryParams,
+} from './reputation';
+
+export {
+  ValidationAPI,
+  ValidationRequestBuilder,
+  ValidationResponse,
+  validationResponseToString,
+  validationResponseFromString,
+  VALIDATION_REGISTRY_ADDRESS,
+  type ValidationAPIConfig,
+  type ValidationRequest,
+  type ValidationRequestParams,
+  type ValidationResponseParams,
+  type ValidationStatus,
+  type TeeAttestationData,
+  type ZkProofData,
+} from './validation';
+
 // Version
 export const VERSION = '0.1.0';
 export const PROTOCOL_VERSION = '2-of-3-threshold-ecdsa';
