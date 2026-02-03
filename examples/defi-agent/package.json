@@ -10,7 +10,7 @@
     "dev": "tsx watch src/index.ts"
   },
   "dependencies": {
-    "@mpc-wallet/sdk": "^0.1.0",
+    "@mpc-wallet/sdk": "latest",
     "viem": "^2.44.0",
     "dotenv": "^16.4.0"
   },

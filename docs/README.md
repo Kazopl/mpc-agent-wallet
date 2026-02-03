@@ -196,6 +196,7 @@ print(f"Wallet address: {address}")
 - [Architecture Guide](./architecture.md) - Learn how the system works
 - [Security Model](./security-model.md) - Threat model and protections
 - [Integration Guide](./integration-guide.md) - Connect with AI frameworks
+- [ERC-8004 Integration](./erc-8004-integration.md) - Agent identity, reputation and validation
 - [TypeScript API Reference](./api-reference/typescript.md)
 - [Python API Reference](./api-reference/python.md)
 
@@ -208,6 +209,7 @@ print(f"Wallet address: {address}")
 | [LangChain Tool](../examples/langchain-tool/) | LangChain tool for blockchain operations |
 | [Telegram Bot](../examples/telegram-bot/) | Approval via Telegram |
 | [DeFi Agent](../examples/defi-agent/) | Automated DeFi operations |
+| [Agent-to-Agent](../examples/agent-to-agent/) | Cross-agent discovery and reputation |
 
 ## Support
 

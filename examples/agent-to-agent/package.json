@@ -1,13 +1,15 @@
 {
-  "name": "mpc-wallet-basic-example",
+  "name": "mpc-wallet-agent-to-agent-example",
   "version": "1.0.0",
-  "description": "Basic example for MPC Agent Wallet SDK",
+  "description": "Agent-to-agent discovery and reputation example using ERC-8004",
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
     "build": "tsc",
     "start": "tsx src/index.ts",
-    "dev": "tsx watch src/index.ts"
+    "dev": "tsx watch src/index.ts",
+    "demo:discovery": "tsx src/demo-discovery.ts",
+    "demo:reputation": "tsx src/demo-reputation.ts"
   },
   "dependencies": {
     "@mpc-wallet/sdk": "latest",

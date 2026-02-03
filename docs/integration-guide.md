@@ -658,3 +658,5 @@ if (context.isKnownProtocol) {
 - [ElizaOS Plugin Example](../examples/elizaos-plugin/) - Full ElizaOS setup
 - [LangChain Tool Example](../examples/langchain-tool/) - LangChain setup
 - [Telegram Bot Example](../examples/telegram-bot/) - Telegram approvals
+- [Agent-to-Agent Example](../examples/agent-to-agent/) - Cross-agent discovery and reputation
+- [ERC-8004 Integration Guide](./erc-8004-integration.md) - Agent identity and reputation
