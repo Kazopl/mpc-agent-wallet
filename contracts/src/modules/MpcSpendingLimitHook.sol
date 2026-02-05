@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.28;
 
 import { ISpendingLimitHook } from "../interfaces/ISpendingLimitHook.sol";
 import { IERC7579Module } from "../interfaces/IERC7579Module.sol";
