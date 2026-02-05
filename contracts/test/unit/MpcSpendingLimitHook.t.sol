@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity ^0.8.24;
+pragma solidity ^0.8.28;
 
 import { BaseTest } from "../Base.t.sol";
 import { MpcSpendingLimitHook } from "../../src/modules/MpcSpendingLimitHook.sol";
@@ -154,18 +154,27 @@ contract MpcSpendingLimitHookTest is BaseTest {
         vm.prank(account);
         spendingLimitHook.configureSpending(20 ether, 25 ether, 50 ether, false);
 
-        // Spend across multiple days
-        for (uint256 i = 0; i < 2; i++) {
-            vm.prank(account);
-            bytes memory hookData = spendingLimitHook.preHook(target1, 20 ether, "");
+        uint256 startTime = block.timestamp;
 
-            vm.prank(account);
-            spendingLimitHook.postHook(hookData, true, "");
+        // Day 1: spend 20 ether
+        vm.prank(account);
+        bytes memory hookData = spendingLimitHook.preHook(target1, 20 ether, "");
+        vm.prank(account);
+        spendingLimitHook.postHook(hookData, true, "");
 
-            vm.warp(block.timestamp + 1 days);
-        }
+        // Advance to day 2 (explicit offset avoids via_ir TIMESTAMP caching)
+        vm.warp(startTime + 1 days + 1);
 
-        // Should exceed weekly limit
+        // Day 2: spend 20 ether (daily resets, weekly accumulates to 40)
+        vm.prank(account);
+        hookData = spendingLimitHook.preHook(target1, 20 ether, "");
+        vm.prank(account);
+        spendingLimitHook.postHook(hookData, true, "");
+
+        // Advance to day 3
+        vm.warp(startTime + 2 days + 2);
+
+        // Should exceed weekly limit (40 + 20 = 60 > 50)
         vm.prank(account);
         vm.expectRevert(abi.encodeWithSelector(ISpendingLimitHook.WeeklyLimitExceeded.selector, 60 ether, 50 ether));
         spendingLimitHook.preHook(target1, 20 ether, "");
