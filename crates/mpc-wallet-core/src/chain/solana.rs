@@ -24,8 +24,6 @@ use super::{
 use crate::{Error, Result, Signature};
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
-// TODO: Migrate from deprecated `system_instruction` to `solana_system_interface::instruction`
-// when updating to solana-sdk 3.x. See: https://github.com/anza-xyz/solana-sdk
 #[allow(deprecated)]
 use solana_sdk::{
     compute_budget::ComputeBudgetInstruction,
@@ -39,8 +37,31 @@ use solana_sdk::{
 };
 use std::str::FromStr;
 
-// Use bincode 1.x for Solana transaction serialization
 use bincode1 as bincode;
+
+fn pubkey_to_address(pk: &Pubkey) -> solana_address::Address {
+    solana_address::Address::from(pk.to_bytes())
+}
+
+fn instruction_v3_to_v2(ix: solana_instruction::Instruction) -> Instruction {
+    Instruction {
+        program_id: Pubkey::new_from_array(ix.program_id.to_bytes()),
+        accounts: ix
+            .accounts
+            .into_iter()
+            .map(|a| AccountMeta {
+                pubkey: Pubkey::new_from_array(a.pubkey.to_bytes()),
+                is_signer: a.is_signer,
+                is_writable: a.is_writable,
+            })
+            .collect(),
+        data: ix.data,
+    }
+}
+
+fn address_to_pubkey(addr: solana_address::Address) -> Pubkey {
+    Pubkey::new_from_array(addr.to_bytes())
+}
 
 // ============================================================================
 // Constants
@@ -337,10 +358,12 @@ impl SolanaAdapter {
         let mint_pubkey = Pubkey::from_str(mint)
             .map_err(|e| Error::InvalidConfig(format!("Invalid mint: {}", e)))?;
 
+        let owner_addr = pubkey_to_address(&owner_pubkey);
+        let mint_addr = pubkey_to_address(&mint_pubkey);
         let ata =
-            spl_associated_token_account::get_associated_token_address(&owner_pubkey, &mint_pubkey);
+            spl_associated_token_account::get_associated_token_address(&owner_addr, &mint_addr);
 
-        Ok(ata.to_string())
+        Ok(address_to_pubkey(ata).to_string())
     }
 
     /// Build instructions for creating an ATA if needed
@@ -363,15 +386,19 @@ impl SolanaAdapter {
             let mint_pubkey = Pubkey::from_str(mint)
                 .map_err(|e| Error::InvalidConfig(format!("Invalid mint: {}", e)))?;
 
-            let instruction =
+            let payer_addr = pubkey_to_address(&payer_pubkey);
+            let owner_addr = pubkey_to_address(&owner_pubkey);
+            let mint_addr = pubkey_to_address(&mint_pubkey);
+            let token_program_addr = pubkey_to_address(&spl_token::id());
+            let ix_v3 =
                 spl_associated_token_account::instruction::create_associated_token_account(
-                    &payer_pubkey,
-                    &owner_pubkey,
-                    &mint_pubkey,
-                    &spl_token::id(),
+                    &payer_addr,
+                    &owner_addr,
+                    &mint_addr,
+                    &token_program_addr,
                 );
 
-            Ok(Some(instruction))
+            Ok(Some(instruction_v3_to_v2(ix_v3)))
         } else {
             Ok(None)
         }
@@ -891,10 +918,15 @@ impl TokenTransferBuilder {
         let mint_pubkey = Pubkey::from_str(&self.mint)
             .map_err(|e| Error::InvalidConfig(format!("Invalid mint: {}", e)))?;
 
-        let from_ata =
-            spl_associated_token_account::get_associated_token_address(&from_pubkey, &mint_pubkey);
-        let to_ata =
-            spl_associated_token_account::get_associated_token_address(&to_pubkey, &mint_pubkey);
+        let from_addr = pubkey_to_address(&from_pubkey);
+        let to_addr = pubkey_to_address(&to_pubkey);
+        let mint_addr = pubkey_to_address(&mint_pubkey);
+        let from_ata = address_to_pubkey(
+            spl_associated_token_account::get_associated_token_address(&from_addr, &mint_addr),
+        );
+        let to_ata = address_to_pubkey(
+            spl_associated_token_account::get_associated_token_address(&to_addr, &mint_addr),
+        );
 
         let mut instructions = Vec::new();
 
