@@ -11,7 +11,7 @@ members = [
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.93"
 authors = ["Cătălin Dinu"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/Kazopl/mpc-agent-wallet"
@@ -52,7 +52,7 @@ ripemd = "0.1"
 digest = "0.10"
 
 # Async runtime
-tokio = { version = "1.42", features = ["full"] }
+tokio = { version = "1.49", features = ["full"] }
 tokio-tungstenite = { version = "0.26", features = ["native-tls"] }
 futures-util = { version = "0.3", features = ["sink"] }
 
@@ -109,6 +109,10 @@ alloy-rpc-types = "0.6"
 solana-sdk = "2.3"
 spl-token = { version = "8.0", features = ["no-entrypoint"] }
 spl-associated-token-account = { version = "8.0", features = ["no-entrypoint"] }
+
+# Solana v3 modular crates (bridge types for SPL 8.x compatibility)
+solana-address = "2.0"
+solana-instruction = "3.1"
 
 [profile.release]
 lto = "thin"
