@@ -79,13 +79,13 @@
     "eslint": "^9.39.2",
     "prettier": "^3.4.0",
     "tsup": "^8.5.1",
-    "typescript": "^5.7.0",
+    "typescript": "^5.9.0",
     "typescript-eslint": "^8.52.0",
-    "vitest": "^2.1.8"
+    "vitest": "^3.0.0"
   },
   "peerDependencies": {
     "@solana/web3.js": "^1.98.0 || ^2.0.0",
-    "viem": "^2.21.0"
+    "viem": "^2.46.0"
   },
   "peerDependenciesMeta": {
     "viem": {
